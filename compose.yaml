@@ -1,0 +1,21 @@
+# Luffy 平台契约 (附录 A.1):
+#   - 唯一 entrypoint service 标 luffy.entrypoint=true + luffy.port
+#   - 不暴露 ports 到主机 (反代通过 luffy-public 网络接入)
+#   - 命名 volume 用 ${slug}-data 占位, augment 阶段平台填充真名
+#   - resource limits 不在这里写, 平台 augment 强制注入
+
+services:
+  web:
+    build: .
+    labels:
+      - "luffy.entrypoint=true"
+      - "luffy.port=3000"
+    environment:
+      DATABASE_URL: "file:/data/app.db"
+      NODE_ENV: "production"
+    volumes:
+      - data:/data
+
+volumes:
+  data:
+    name: ${slug}-data
