@@ -209,9 +209,11 @@ create table if not exists public.tools (
   rating numeric(2,1) not null default 0,
   reviews integer not null default 0,
   specs jsonb not null default '[]'::jsonb,
-  pros jsonb not null default '[]'::jsonb
+  pros jsonb not null default '[]'::jsonb,
+  tags jsonb not null default '[]'::jsonb
 );
 
+alter table public.tools add column if not exists tags jsonb not null default '[]'::jsonb;
 alter table public.wiki_pages add column if not exists image_url text;
 alter table public.wiki_revisions add column if not exists image_url text;
 

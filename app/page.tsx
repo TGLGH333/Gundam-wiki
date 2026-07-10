@@ -28,7 +28,8 @@ type WikiPage = {
 type Revision = { id: number; pageId: number; revision: number; content: string; summary: string; editor: string; status: "approved" | "pending" | "rejected"; createdAt: string; imageUrl?: string };
 type Work = { id: number; title: string; kit: string; desc: string; tags: string[]; author: string; likes: number; comments: number; color: string; createdAt: string };
 type Post = { id: number; board: string; title: string; content: string; author: string; replies: number; likes: number; pinned?: boolean; featured?: boolean; createdAt: string };
-type Tool = { id: number; name: string; brand: string; category: string; price: string; rating: number; reviews: number; specs: string[]; pros: string[] };
+type Tool = { id: number; name: string; brand: string; category: string; price: string; rating: number; reviews: number; specs: string[]; pros: string[]; tags: string[] };
+type SearchScope = "all" | "wiki" | "works" | "tools" | "forum";
 type User = { id: string; username: string; nickname: string; role: Role; score: number; status?: "active" | "suspended" };
 type ManagedUser = { id: string; email: string; username: string; display_name?: string; role: "user" | "admin"; account_status: "active" | "suspended"; contribution_score: number; created_at: string };
 type TargetType = "post" | "work" | "tool";
@@ -131,9 +132,9 @@ const seedPosts: Post[] = [
 ];
 
 const seedTools: Tool[] = [
-  { id: 1, name: "SPN-120 单刃剪钳", brand: "神之手", category: "剪钳/水口钳", price: "¥320-420", rating: 4.8, reviews: 126, specs: ["单刃", "适合精修", "需注意维护"], pros: ["水口白痕少", "手感细腻", "适合二段剪"] },
-  { id: 2, name: "田宫 74035 精密剪钳", brand: "田宫", category: "剪钳/水口钳", price: "¥130-180", rating: 4.5, reviews: 89, specs: ["双刃", "耐用", "入门友好"], pros: ["耐用度高", "维护简单", "泛用性强"] },
-  { id: 3, name: "郡士 WC01 黑色渗线液", brand: "郡士", category: "渗线工具", price: "¥28-38", rating: 4.6, reviews: 203, specs: ["水性", "黑色", "适合深色阴影"], pros: ["流动性好", "味道较轻", "易清理"] },
+  { id: 1, name: "SPN-120 单刃剪钳", brand: "神之手", category: "剪钳/水口钳", price: "¥320-420", rating: 4.8, reviews: 126, specs: ["单刃", "适合精修", "需注意维护"], pros: ["水口白痕少", "手感细腻", "适合二段剪"], tags: ["单刃钳", "水口处理", "进阶工具"] },
+  { id: 2, name: "田宫 74035 精密剪钳", brand: "田宫", category: "剪钳/水口钳", price: "¥130-180", rating: 4.5, reviews: 89, specs: ["双刃", "耐用", "入门友好"], pros: ["耐用度高", "维护简单", "泛用性强"], tags: ["双刃钳", "新手工具", "水口处理"] },
+  { id: 3, name: "郡士 WC01 黑色渗线液", brand: "郡士", category: "渗线工具", price: "¥28-38", rating: 4.6, reviews: 203, specs: ["水性", "黑色", "适合深色阴影"], pros: ["流动性好", "味道较轻", "易清理"], tags: ["渗线", "水性工具", "涂装辅助"] },
 ];
 
 function readStore<T>(key: string, fallback: T): T {
@@ -188,6 +189,9 @@ export default function Home() {
   const [selectedToolId, setSelectedToolId] = useState(seedTools[0]?.id ?? 1);
   const [selectedWikiId, setSelectedWikiId] = useState(1);
   const [query, setQuery] = useState("");
+  const [selectedTag, setSelectedTag] = useState("");
+  const [searchScope, setSearchScope] = useState<SearchScope>("all");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [compare, setCompare] = useState(false);
   const [remoteLoaded, setRemoteLoaded] = useState(false);
@@ -256,7 +260,7 @@ export default function Home() {
       if (revisionResult.data?.length) setRevisions(revisionResult.data.map((item: RemoteRevision) => ({ id: item.id, pageId: item.page_id, revision: item.revision, content: item.content, summary: item.summary, editor: item.editor, status: item.status, imageUrl: item.image_url, createdAt: item.created_at })) as Revision[]);
       if (workResult.data?.length) setWorks(workResult.data.map((item: RemoteWork) => ({ id: item.id, title: item.title, kit: item.kit, desc: item.description, tags: item.tags, author: item.author, likes: item.likes, comments: item.comments, color: item.color, imageUrl: item.image_url, createdAt: item.created_at })) as Work[]);
       if (postResult.data?.length) setPosts(postResult.data.map((item: RemotePost) => ({ id: item.id, board: item.board, title: item.title, content: item.content, author: item.author, replies: item.replies, likes: item.likes, pinned: item.pinned, featured: item.featured, createdAt: item.created_at })) as Post[]);
-      if (toolResult.data?.length) setTools(toolResult.data as Tool[]);
+      if (toolResult.data?.length) setTools(toolResult.data.map((item: Tool) => ({ ...item, tags: Array.isArray(item.tags) ? item.tags : [] })) as Tool[]);
       if (commentResult.data?.length) setComments(commentResult.data.map((item: { id: number; target_type: TargetType; target_id: number; author: string; user_id: string; content: string; rating?: number; created_at: string }) => ({ id: item.id, targetType: item.target_type, targetId: item.target_id, author: item.author, userId: item.user_id, content: item.content, rating: item.rating, createdAt: item.created_at })));
       if (likeResult.data?.length) setLikes(likeResult.data.map((item: { id: string; target_type: "post" | "work"; target_id: number; user_id: string }) => ({ id: item.id, targetType: item.target_type, targetId: item.target_id, userId: item.user_id })));
       if (authResult.data.user?.email) void applyAuthenticatedUser(authResult.data.user);
@@ -315,23 +319,32 @@ export default function Home() {
   const hotTerms = ["RG元祖2.0", "渗线", "神之手剪钳", "MGEX强袭自由", "无缝处理"];
   const pendingCount = revisions.filter((item) => item.status === "pending").length + wiki.filter((item) => item.status === "pending").length;
 
+  const allTags = useMemo(() => Array.from(new Set([
+    ...wiki.flatMap((item) => item.tags ?? []),
+    ...works.flatMap((item) => item.tags ?? []),
+    ...tools.flatMap((item) => item.tags ?? []),
+  ])).sort((a, b) => a.localeCompare(b, "zh-CN")), [wiki, works, tools]);
+
   const searchResults = useMemo(() => {
     const key = query.trim().toLowerCase();
-    if (!key) return [];
-    const wikiResults = wiki
-      .filter((item) => [item.title, item.summary, item.content, item.tags.join(" ")].join(" ").toLowerCase().includes(key))
-      .map((item) => ({ type: "Wiki", title: item.title, desc: item.summary, id: item.id }));
-    const workResults = works
-      .filter((item) => [item.title, item.kit, item.desc, item.tags.join(" ")].join(" ").toLowerCase().includes(key))
-      .map((item) => ({ type: "作品", title: item.title, desc: item.desc, id: item.id }));
-    const postResults = posts
-      .filter((item) => [item.title, item.content, item.board].join(" ").toLowerCase().includes(key))
-      .map((item) => ({ type: "论坛", title: item.title, desc: item.content, id: item.id }));
-    const toolResults = tools
-      .filter((item) => [item.name, item.brand, item.category, item.specs.join(" ")].join(" ").toLowerCase().includes(key))
-      .map((item) => ({ type: "工具", title: item.name, desc: `${item.brand} · ${item.category} · ${item.rating}分`, id: item.id }));
-    return [...wikiResults, ...workResults, ...postResults, ...toolResults];
-  }, [query, wiki, works, posts, tools]);
+    const tag = selectedTag.trim().toLowerCase();
+    const matchesText = (values: string[]) => !key || values.join(" ").toLowerCase().includes(key);
+    const matchesTag = (tags: string[]) => !tag || tags.some((item) => item.toLowerCase() === tag);
+    const inScope = (scope: SearchScope) => searchScope === "all" || searchScope === scope;
+    const wikiResults = inScope("wiki") ? wiki
+      .filter((item) => matchesText([item.title, item.summary, item.content, ...(item.tags ?? [])]) && matchesTag(item.tags ?? []))
+      .map((item) => ({ type: "知识库", scope: "wiki" as SearchScope, title: item.title, desc: item.summary, id: item.id, tags: item.tags ?? [] })) : [];
+    const workResults = inScope("works") ? works
+      .filter((item) => matchesText([item.title, item.kit, item.desc, ...(item.tags ?? [])]) && matchesTag(item.tags ?? []))
+      .map((item) => ({ type: "作品", scope: "works" as SearchScope, title: item.title, desc: item.desc, id: item.id, tags: item.tags ?? [] })) : [];
+    const toolResults = inScope("tools") ? tools
+      .filter((item) => matchesText([item.name, item.brand, item.category, ...item.specs, ...(item.tags ?? [])]) && matchesTag(item.tags ?? []))
+      .map((item) => ({ type: "工具", scope: "tools" as SearchScope, title: item.name, desc: `${item.brand} · ${item.category} · ${item.rating}分`, id: item.id, tags: item.tags ?? [] })) : [];
+    const postResults = !tag && inScope("forum") ? posts
+      .filter((item) => matchesText([item.title, item.content, item.board]))
+      .map((item) => ({ type: "讨论", scope: "forum" as SearchScope, title: item.title, desc: item.content, id: item.id, tags: [item.board] })) : [];
+    return [...wikiResults, ...workResults, ...toolResults, ...postResults];
+  }, [query, selectedTag, searchScope, wiki, works, tools, posts]);
 
   async function handleSupabaseAuth(action: "signin" | "signup" | "signout", email = "", password = "", portal: "user" | "admin" = "user", username = "") {
     const supabase = createSupabaseBrowserClient();
@@ -487,8 +500,17 @@ export default function Home() {
 
   function submitSearch(value = query) {
     const next = value.trim();
-    if (!next) return;
+    if (!next && !selectedTag && searchScope === "all") return;
     setQuery(next);
+    if (next) setSelectedTag("");
+    setSection("search");
+  }
+
+  function searchByTag(tag: string) {
+    setQuery("");
+    setSelectedTag(tag);
+    setSearchScope("all");
+    setFiltersOpen(false);
     setSection("search");
   }
 
@@ -504,24 +526,24 @@ export default function Home() {
         <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-blue-100 bg-white/90 px-3 py-2 text-xs text-slate-600 shadow-lg backdrop-blur">{notice}</div>
 
         {section === "login" && <LoginSection supabaseEnabled={supabaseEnabled} onAuth={handleSupabaseAuth} />}
-        {section === "home" && <HomeSection wiki={wiki} works={works} posts={posts} hotTerms={hotTerms} query={query} setQuery={setQuery} submitSearch={submitSearch} openWiki={openWiki} setSection={setSection} />}
-        {section === "wiki" && selectedWiki && <WikiSection page={selectedWiki} pages={wiki} revisions={revisions.filter((item) => item.pageId === selectedWiki.id)} user={user} editing={editing} setEditing={setEditing} compare={compare} setCompare={setCompare} onSelect={openWiki} supabaseEnabled={supabaseEnabled} setNotice={setNotice} onSave={(nextContent, summary, imageUrl) => {
+        {section === "home" && <HomeSection wiki={wiki} works={works} posts={posts} hotTerms={hotTerms} query={query} setQuery={setQuery} submitSearch={submitSearch} openWiki={openWiki} setSection={setSection} filtersOpen={filtersOpen} setFiltersOpen={setFiltersOpen} selectedTag={selectedTag} setSelectedTag={setSelectedTag} searchScope={searchScope} setSearchScope={setSearchScope} allTags={allTags} />}
+        {section === "wiki" && selectedWiki && <WikiSection page={selectedWiki} pages={wiki} revisions={revisions.filter((item) => item.pageId === selectedWiki.id)} user={user} editing={editing} setEditing={setEditing} compare={compare} setCompare={setCompare} onSelect={openWiki} supabaseEnabled={supabaseEnabled} setNotice={setNotice} onTagSearch={searchByTag} onSave={(nextContent, summary, tags, imageUrl) => {
           const nextRev = selectedWiki.revision + 1;
           const needReview = user.role === "user";
-          setWiki((list) => list.map((item) => item.id === selectedWiki.id ? { ...item, content: needReview ? item.content : nextContent, imageUrl: needReview ? item.imageUrl : imageUrl, revision: needReview ? item.revision : nextRev, status: needReview ? "pending" : item.status, updatedAt: new Date().toISOString().slice(0, 10) } : item));
+          setWiki((list) => list.map((item) => item.id === selectedWiki.id ? { ...item, content: needReview ? item.content : nextContent, tags, imageUrl: needReview ? item.imageUrl : imageUrl, revision: needReview ? item.revision : nextRev, status: needReview ? "pending" : item.status, updatedAt: new Date().toISOString().slice(0, 10) } : item));
           setRevisions((list) => [...list, { id: Date.now(), pageId: selectedWiki.id, revision: nextRev, content: nextContent, summary, editor: user.nickname, status: needReview ? "pending" : "approved", imageUrl, createdAt: new Date().toISOString().slice(0, 10) }]);
           setEditing(false);
           setNotice(needReview ? "编辑已进入审核队列，管理员通过后会发布。" : "条目已发布新版本，版本历史已同步记录。")
         }} />}
         {section === "wiki" && !selectedWiki && <section className="rounded-[2rem] bg-white p-10 text-center shadow-xl"><h1 className="text-2xl font-black">知识库正在恢复</h1><p className="mt-3 text-slate-500">暂未读取到有效条目，请重新加载默认内容。</p><button onClick={() => { setWiki(seedWiki); setSelectedWikiId(seedWiki[0].id); }} className="mt-5 rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white">恢复默认条目</button></section>}
-        {section === "search" && <SearchSection query={query} setQuery={setQuery} results={searchResults} hotTerms={hotTerms} submitSearch={submitSearch} openWiki={openWiki} setSection={setSection} />}
-        {section === "gallery" && <CloudGallerySection works={works} setSection={setSection} openWork={openWork} />}
-        {section === "work-detail" && selectedWork && <CommunityDetail type="work" item={selectedWork} comments={comments.filter((comment) => comment.targetType === "work" && comment.targetId === selectedWork.id)} liked={likes.some((like) => like.targetType === "work" && like.targetId === selectedWork.id && like.userId === user.id)} onBack={() => setSection("gallery")} onLike={() => toggleLike("work", selectedWork.id)} onComment={(content) => addComment("work", selectedWork.id, content)} canModerate={user.role === "admin"} onDeleteComment={deleteComment} />}
+        {section === "search" && <SearchSection query={query} setQuery={setQuery} results={searchResults} hotTerms={hotTerms} submitSearch={submitSearch} openWiki={openWiki} openWork={openWork} openTool={openTool} openPost={openPost} filtersOpen={filtersOpen} setFiltersOpen={setFiltersOpen} selectedTag={selectedTag} setSelectedTag={setSelectedTag} searchScope={searchScope} setSearchScope={setSearchScope} allTags={allTags} />}
+        {section === "gallery" && <CloudGallerySection works={works} setSection={setSection} openWork={openWork} onTagSearch={searchByTag} />}
+        {section === "work-detail" && selectedWork && <CommunityDetail type="work" item={selectedWork} comments={comments.filter((comment) => comment.targetType === "work" && comment.targetId === selectedWork.id)} liked={likes.some((like) => like.targetType === "work" && like.targetId === selectedWork.id && like.userId === user.id)} onBack={() => setSection("gallery")} onLike={() => toggleLike("work", selectedWork.id)} onComment={(content) => addComment("work", selectedWork.id, content)} canModerate={user.role === "admin"} onDeleteComment={deleteComment} onTagSearch={searchByTag} />}
         {section === "publish" && <CloudPublishSection user={user} works={works} setWorks={setWorks} setSection={setSection} setNotice={setNotice} supabaseEnabled={supabaseEnabled} />}
         {section === "forum" && <ForumSection posts={posts} setPosts={setPosts} user={user} setNotice={setNotice} openPost={openPost} />}
         {section === "post-detail" && selectedPost && <CommunityDetail type="post" item={selectedPost} comments={comments.filter((comment) => comment.targetType === "post" && comment.targetId === selectedPost.id)} liked={likes.some((like) => like.targetType === "post" && like.targetId === selectedPost.id && like.userId === user.id)} onBack={() => setSection("forum")} onLike={() => toggleLike("post", selectedPost.id)} onComment={(content) => addComment("post", selectedPost.id, content)} canModerate={user.role === "admin"} onDeleteComment={deleteComment} />}
-        {section === "tools" && <ToolsSection tools={tools} user={user} setTools={setTools} setNotice={setNotice} openTool={openTool} />}
-        {section === "tool-detail" && selectedTool && <ToolDetail tool={selectedTool} comments={comments.filter((comment) => comment.targetType === "tool" && comment.targetId === selectedTool.id)} onBack={() => setSection("tools")} onReview={(content, rating) => addComment("tool", selectedTool.id, content, rating)} canModerate={user.role === "admin"} onDeleteComment={deleteComment} />}
+        {section === "tools" && <ToolsSection tools={tools} user={user} setTools={setTools} setNotice={setNotice} openTool={openTool} onTagSearch={searchByTag} />}
+        {section === "tool-detail" && selectedTool && <ToolDetail tool={selectedTool} onTagSearch={searchByTag} comments={comments.filter((comment) => comment.targetType === "tool" && comment.targetId === selectedTool.id)} onBack={() => setSection("tools")} onReview={(content, rating) => addComment("tool", selectedTool.id, content, rating)} canModerate={user.role === "admin"} onDeleteComment={deleteComment} />}
         {section === "admin" && <AdminSection user={user} wiki={wiki} setWiki={setWiki} revisions={revisions} setRevisions={setRevisions} works={works} posts={posts} tools={tools} comments={comments} managedUsers={managedUsers} pendingCount={pendingCount} setNotice={setNotice} onDeleteEntry={deleteEntry} onDeleteComment={deleteComment} onUpdateUser={updateManagedUser} onDeleteUser={deleteManagedUser} />}
         {section === "profile" && <ProfileSection user={user} wiki={wiki} works={works} posts={posts} onChangeUsername={changeUsername} />}
       </div>
@@ -531,7 +553,8 @@ export default function Home() {
 
 function Header({ section, setSection, user, login, pendingCount, supabaseEnabled, supabaseUser, onAuth }: { section: Section; setSection: (s: Section) => void; user: User; login: (r: Role) => void; pendingCount: number; supabaseEnabled: boolean; supabaseUser: string | null; onAuth: (action: "signin" | "signup" | "signout", email?: string, password?: string, portal?: "user" | "admin", username?: string) => Promise<void> }) {
   const nav: { key: Section; label: string }[] = [
-    { key: "home", label: "首页" }, { key: "wiki", label: "知识库" }, { key: "gallery", label: "作品" }, { key: "forum", label: "讨论" }, { key: "tools", label: "工具" }, { key: "admin", label: "管理" },
+    { key: "home", label: "首页" }, { key: "wiki", label: "知识库" }, { key: "gallery", label: "作品" }, { key: "forum", label: "讨论" }, { key: "tools", label: "工具" },
+    ...(user.role === "admin" ? [{ key: "admin" as Section, label: "管理" }] : []),
   ];
   return <header className="sticky top-3 z-20 mb-4 px-3 py-2 backdrop-blur-xl">
     <div className="flex items-start justify-between gap-3">
@@ -624,23 +647,36 @@ function LoginSection({ supabaseEnabled, onAuth }: { supabaseEnabled: boolean; o
   </section>;
 }
 
-function HomeSection({ wiki, works, posts, hotTerms, query, setQuery, submitSearch, openWiki, setSection }: { wiki: WikiPage[]; works: Work[]; posts: Post[]; hotTerms: string[]; query: string; setQuery: (q: string) => void; submitSearch: (value?: string) => void; openWiki: (id: number) => void; setSection: (s: Section) => void }) {
+function SearchFilters({ open, selectedTag, setSelectedTag, searchScope, setSearchScope, allTags }: { open: boolean; selectedTag: string; setSelectedTag: (tag: string) => void; searchScope: SearchScope; setSearchScope: (scope: SearchScope) => void; allTags: string[] }) {
+  if (!open) return null;
+  const scopes: { value: SearchScope; label: string }[] = [{ value: "all", label: "全部版面" }, { value: "wiki", label: "知识库" }, { value: "works", label: "作品" }, { value: "tools", label: "工具" }, { value: "forum", label: "讨论" }];
+  return <div className="mt-3 rounded-2xl border border-blue-100 bg-white p-4 shadow-xl">
+    <div className="text-xs font-black tracking-[.18em] text-slate-400">按版面筛选</div>
+    <div className="mt-3 flex flex-wrap gap-2">{scopes.map((item) => <button key={item.value} onClick={() => setSearchScope(item.value)} className={`rounded-full px-3 py-2 text-xs font-bold ${searchScope === item.value ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>{item.label}</button>)}</div>
+    <div className="mt-5 flex items-center justify-between"><div className="text-xs font-black tracking-[.18em] text-slate-400">按标签筛选</div>{selectedTag && <button onClick={() => setSelectedTag("")} className="text-xs font-bold text-blue-600">清除标签</button>}</div>
+    <div className="mt-3 flex max-h-40 flex-wrap gap-2 overflow-auto">{allTags.map((tag) => <button key={tag} onClick={() => setSelectedTag(selectedTag === tag ? "" : tag)} className={`rounded-full border px-3 py-1.5 text-xs font-bold ${selectedTag === tag ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-slate-50 text-slate-600"}`}>#{tag}</button>)}</div>
+  </div>;
+}
+
+function HomeSection({ wiki, works, posts, hotTerms, query, setQuery, submitSearch, openWiki, setSection, filtersOpen, setFiltersOpen, selectedTag, setSelectedTag, searchScope, setSearchScope, allTags }: { wiki: WikiPage[]; works: Work[]; posts: Post[]; hotTerms: string[]; query: string; setQuery: (q: string) => void; submitSearch: (value?: string) => void; openWiki: (id: number) => void; setSection: (s: Section) => void; filtersOpen: boolean; setFiltersOpen: (open: boolean) => void; selectedTag: string; setSelectedTag: (tag: string) => void; searchScope: SearchScope; setSearchScope: (scope: SearchScope) => void; allTags: string[] }) {
   return <section className="space-y-6">
-    <div className="rounded-[1.5rem] border border-white/20 bg-white p-2 shadow-xl sm:flex">
-      <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submitSearch()} placeholder="搜索模型、技法、作品、帖子或工具" className="min-h-12 flex-1 rounded-xl px-4 outline-none" />
-      <button onClick={() => submitSearch()} className="w-full rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white sm:w-auto">搜索</button>
+    <div>
+      <div className="rounded-[1.5rem] border border-white/20 bg-white p-2 shadow-xl sm:flex">
+        <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submitSearch()} placeholder="搜索模型、技法、作品、帖子或工具" className="min-h-12 flex-1 rounded-xl px-4 outline-none" />
+        <button onClick={() => setFiltersOpen(!filtersOpen)} className={`w-full rounded-xl px-5 py-3 text-sm font-bold sm:w-auto ${filtersOpen || selectedTag || searchScope !== "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}>筛选{selectedTag || searchScope !== "all" ? " · 已启用" : ""}</button>
+        <button onClick={() => submitSearch()} className="w-full rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white sm:w-auto">搜索</button>
+      </div>
+      <SearchFilters open={filtersOpen} selectedTag={selectedTag} setSelectedTag={setSelectedTag} searchScope={searchScope} setSearchScope={setSearchScope} allTags={allTags} />
     </div>
     <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-slate-500"><span>热门搜索</span>{hotTerms.map((term) => <button key={term} onClick={() => { setQuery(term); submitSearch(term); }} className="rounded-full border border-white/20 bg-white px-3 py-1.5 font-bold text-slate-600">{term}</button>)}</div>
-
     <div className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-blue-950 to-blue-700 p-8 text-white shadow-2xl sm:p-12">
       <div className="mb-8 flex flex-wrap gap-2">{categories.slice(0, 4).map((item) => <span key={item} className="rounded-full bg-white/10 px-3 py-1.5 text-xs backdrop-blur">{item}</span>)}</div>
       <h1 className="max-w-4xl text-4xl font-black leading-tight sm:text-6xl">高达模型制作知识与作品社区</h1>
       <p className="mt-5 max-w-2xl text-base leading-7 text-blue-100 sm:text-lg">查找制作教程、套件资料与工具评价，也可以分享作品、参与讨论并共同完善知识库。</p>
-      <div className="mt-8 flex flex-wrap gap-3"><button onClick={() => openWiki(wiki[0].id)} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white">浏览知识库</button><button onClick={() => setSection("gallery")} className="rounded-xl border border-white/20 bg-white/10 px-5 py-3 text-sm font-bold text-white">查看作品</button></div>
+      <div className="mt-8 flex flex-wrap gap-3">{wiki[0] && <button onClick={() => openWiki(wiki[0].id)} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white">浏览知识库</button>}<button onClick={() => setSection("gallery")} className="rounded-xl border border-white/20 bg-white/10 px-5 py-3 text-sm font-bold text-white">查看作品</button></div>
     </div>
-
     <div className="grid gap-6 lg:grid-cols-3">
-      <Panel title="热门条目" action="进入知识库" onAction={() => openWiki(wiki[0].id)}><div className="space-y-3">{wiki.map((item, index) => <button key={item.id} onClick={() => openWiki(item.id)} className="flex w-full items-center gap-3 rounded-2xl bg-slate-50 p-3 text-left hover:bg-blue-50"><span className="grid h-8 w-8 place-items-center rounded-lg bg-blue-100 text-sm font-bold text-blue-700">{index + 1}</span><span><span className="block font-bold">{item.title}</span><span className="text-xs text-slate-500">{item.category} · {item.views.toLocaleString()} 浏览</span></span></button>)}</div></Panel>
+      <Panel title="热门条目" action="进入知识库" onAction={() => wiki[0] && openWiki(wiki[0].id)}><div className="space-y-3">{wiki.map((item, index) => <button key={item.id} onClick={() => openWiki(item.id)} className="flex w-full items-center gap-3 rounded-2xl bg-slate-50 p-3 text-left hover:bg-blue-50"><span className="grid h-8 w-8 place-items-center rounded-lg bg-blue-100 text-sm font-bold text-blue-700">{index + 1}</span><span><span className="block font-bold">{item.title}</span><span className="text-xs text-slate-500">{item.category} · {item.views.toLocaleString()} 浏览</span></span></button>)}</div></Panel>
       <Panel title="最新作品" action="查看全部" onAction={() => setSection("gallery")}><div className="grid gap-3">{works.map((work) => <button onClick={() => setSection("gallery")} key={work.id} className="flex gap-3 rounded-2xl bg-slate-50 p-3 text-left"><div className={`h-16 w-20 rounded-xl bg-gradient-to-br ${work.color}`} /><div><div className="font-bold">{work.title}</div><div className="text-xs text-slate-500">{work.kit}</div><div className="mt-1 text-xs text-slate-400">♥ {work.likes} · 评论 {work.comments}</div></div></button>)}</div></Panel>
       <Panel title="社区动态" action="去讨论" onAction={() => setSection("forum")}><div className="space-y-3">{posts.map((post) => <button onClick={() => setSection("forum")} key={post.id} className="block w-full rounded-2xl border border-slate-100 p-4 text-left"><div className="text-xs font-semibold text-blue-600">{post.board}</div><div className="mt-1 font-bold">{post.title}</div><div className="mt-2 text-xs text-slate-400">{post.replies} 回复 · {post.likes} 赞</div></button>)}</div></Panel>
     </div>
@@ -651,9 +687,10 @@ function Panel({ title, action, onAction, children }: { title: string; action?: 
   return <div className="rounded-[1.75rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/50"><div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-black">{title}</h2>{action && <button onClick={onAction} className="text-sm font-bold text-blue-600 hover:text-blue-800">{action}</button>}</div>{children}</div>;
 }
 
-function WikiSection({ page, pages, revisions, user, editing, setEditing, compare, setCompare, onSelect, onSave, supabaseEnabled, setNotice }: { page: WikiPage; pages: WikiPage[]; revisions: Revision[]; user: User; editing: boolean; setEditing: (v: boolean) => void; compare: boolean; setCompare: (v: boolean) => void; onSelect: (id: number) => void; onSave: (content: string, summary: string, imageUrl?: string) => void; supabaseEnabled: boolean; setNotice: (notice: string) => void }) {
+function WikiSection({ page, pages, revisions, user, editing, setEditing, compare, setCompare, onSelect, onSave, onTagSearch, supabaseEnabled, setNotice }: { page: WikiPage; pages: WikiPage[]; revisions: Revision[]; user: User; editing: boolean; setEditing: (v: boolean) => void; compare: boolean; setCompare: (v: boolean) => void; onSelect: (id: number) => void; onSave: (content: string, summary: string, tags: string[], imageUrl?: string) => void; onTagSearch: (tag: string) => void; supabaseEnabled: boolean; setNotice: (notice: string) => void }) {
   const [content, setContent] = useState(page.content);
   const [summary, setSummary] = useState("补充条目内容");
+  const [tagText, setTagText] = useState(page.tags.join(","));
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   async function submitEdit() {
@@ -667,12 +704,12 @@ function WikiSection({ page, pages, revisions, user, editing, setEditing, compar
       if (result?.error) { setNotice(result.error.message); setUploading(false); return; }
       imageUrl = supabase?.storage.from("wiki-images").getPublicUrl(path).data.publicUrl;
     }
-    onSave(content, summary, imageUrl);
+    onSave(content, summary, tagText.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean), imageUrl);
     setUploading(false);
     setImageFile(null);
   }
   const canEdit = user.role !== "guest" && page.status !== "locked";
-  useEffect(() => { setContent(page.content); }, [page.id, page.content]);
+  useEffect(() => { setContent(page.content); setTagText(page.tags.join(",")); }, [page.id, page.content, page.tags]);
   return (
     <section className="grid gap-6 lg:grid-cols-[280px_1fr]">
       <aside className="space-y-4">
@@ -688,7 +725,7 @@ function WikiSection({ page, pages, revisions, user, editing, setEditing, compar
       <article className="rounded-[2rem] bg-white p-6 shadow-xl shadow-slate-200/60">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-5">
           <div>
-            <div className="mb-2 flex flex-wrap gap-2">{page.tags.map((tag) => <span key={tag} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{tag}</span>)}</div>
+            <div className="mb-2 flex flex-wrap gap-2">{page.tags.map((tag) => <button key={tag} onClick={() => onTagSearch(tag)} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700 hover:bg-blue-100">#{tag}</button>)}</div>
             <h1 className="text-3xl font-black">{page.title}</h1>
             <p className="mt-3 max-w-3xl text-slate-600">{page.summary}</p>
             <div className="mt-3 text-sm text-slate-400">v{page.revision} · {page.updatedAt} 更新 · {page.views.toLocaleString()}浏览 · {page.likes}赞</div>
@@ -699,7 +736,7 @@ function WikiSection({ page, pages, revisions, user, editing, setEditing, compar
           </div>
         </div>
         {page.imageUrl && !editing && <img src={page.imageUrl} alt={page.title} className="mb-6 max-h-[480px] w-full rounded-3xl object-cover" />}
-        {editing ? <div className="grid gap-5 xl:grid-cols-2"><div><label className="text-sm font-bold text-slate-500">Wiki语法编辑</label><textarea value={content} onChange={(e) => setContent(e.target.value)} className="mt-2 h-[460px] w-full rounded-3xl border border-slate-200 bg-slate-50 p-4 font-mono text-sm outline-none focus:border-blue-300" /><input value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="编辑摘要，5-200字符" className="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-blue-300" /><label className="mt-3 block"><span className="text-sm font-bold text-slate-500">条目图片</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files?.[0] ?? null)} className="mt-2 block w-full rounded-2xl border border-dashed p-4" /></label><button onClick={submitEdit} disabled={uploading || summary.length < 5} className="mt-3 rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white disabled:bg-slate-300">{uploading ? "上传中…" : "保存并提交审核"}</button></div><Preview content={content} /></div> : compare ? <RevisionView revisions={revisions} /> : <Preview content={page.content} />}
+        {editing ? <div className="grid gap-5 xl:grid-cols-2"><div><label className="text-sm font-bold text-slate-500">Wiki语法编辑</label><textarea value={content} onChange={(e) => setContent(e.target.value)} className="mt-2 h-[460px] w-full rounded-3xl border border-slate-200 bg-slate-50 p-4 font-mono text-sm outline-none focus:border-blue-300" /><input value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="编辑摘要，5-200字符" className="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-blue-300" /><input value={tagText} onChange={(e) => setTagText(e.target.value)} placeholder="自定义标签，用逗号分隔" className="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-blue-300" /><label className="mt-3 block"><span className="text-sm font-bold text-slate-500">条目图片</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files?.[0] ?? null)} className="mt-2 block w-full rounded-2xl border border-dashed p-4" /></label><button onClick={submitEdit} disabled={uploading || summary.length < 5} className="mt-3 rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white disabled:bg-slate-300">{uploading ? "上传中…" : "保存并提交审核"}</button></div><Preview content={content} /></div> : compare ? <RevisionView revisions={revisions} /> : <Preview content={page.content} />}
       </article>
     </section>
   );
@@ -713,8 +750,21 @@ function RevisionView({ revisions }: { revisions: Revision[] }) {
   return <div className="space-y-3">{revisions.map((rev) => <div key={rev.id} className="rounded-3xl border border-slate-100 bg-slate-50 p-4"><div className="flex flex-wrap justify-between gap-2"><b>版本 v{rev.revision}</b><span className={`rounded-full px-3 py-1 text-xs font-bold ${rev.status === "approved" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>{rev.status === "approved" ? "已通过" : "待审核"}</span></div><div className="mt-2 text-sm text-slate-500">{rev.editor} · {rev.createdAt} · {rev.summary}</div><div className="mt-3 rounded-2xl bg-white p-3 text-sm text-slate-600">{rev.content.slice(0, 220)}...</div></div>)}</div>;
 }
 
-function SearchSection({ query, setQuery, results, hotTerms, submitSearch, openWiki, setSection }: { query: string; setQuery: (q: string) => void; results: { type: string; title: string; desc: string; id: number }[]; hotTerms: string[]; submitSearch: () => void; openWiki: (id: number) => void; setSection: (s: Section) => void }) {
-  return <section className="rounded-[2rem] bg-white p-6 shadow-xl shadow-slate-200/60"><h1 className="text-3xl font-black">全文搜索</h1><div className="mt-5 flex gap-3"><input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitSearch()} className="flex-1 rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-blue-300" /><button onClick={() => submitSearch()} className="rounded-2xl bg-blue-600 px-6 font-bold text-white">搜索</button></div><div className="mt-3 flex flex-wrap gap-2">{hotTerms.map((term) => <button key={term} onClick={() => { setQuery(term); }} className="rounded-full bg-blue-50 px-3 py-1 text-sm font-bold text-blue-700">{term}</button>)}</div><div className="mt-6 space-y-3">{results.length ? results.map((item) => <button key={`${item.type}-${item.id}`} onClick={() => item.type === "Wiki" ? openWiki(item.id) : setSection(item.type === "作品" ? "gallery" : item.type === "论坛" ? "forum" : "tools")} className="w-full rounded-3xl border border-slate-100 bg-slate-50 p-5 text-left hover:border-blue-200 hover:bg-blue-50"><span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-blue-700">{item.type}</span><div className="mt-3 text-xl font-black">{item.title}</div><div className="mt-2 text-slate-600">{item.desc}</div></button>) : <div className="rounded-3xl bg-slate-50 p-8 text-center text-slate-500">未找到相关内容，试试热门条目或提交新条目需求。</div>}</div></section>;
+function SearchSection({ query, setQuery, results, hotTerms, submitSearch, openWiki, openWork, openTool, openPost, filtersOpen, setFiltersOpen, selectedTag, setSelectedTag, searchScope, setSearchScope, allTags }: { query: string; setQuery: (q: string) => void; results: { type: string; scope: SearchScope; title: string; desc: string; id: number; tags: string[] }[]; hotTerms: string[]; submitSearch: () => void; openWiki: (id: number) => void; openWork: (id: number) => void; openTool: (id: number) => void; openPost: (id: number) => void; filtersOpen: boolean; setFiltersOpen: (open: boolean) => void; selectedTag: string; setSelectedTag: (tag: string) => void; searchScope: SearchScope; setSearchScope: (scope: SearchScope) => void; allTags: string[] }) {
+  function openResult(item: { scope: SearchScope; id: number }) {
+    if (item.scope === "wiki") openWiki(item.id);
+    if (item.scope === "works") openWork(item.id);
+    if (item.scope === "tools") openTool(item.id);
+    if (item.scope === "forum") openPost(item.id);
+  }
+  return <section className="rounded-[2rem] bg-white p-6 shadow-xl shadow-slate-200/60">
+    <div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-3xl font-black">全文搜索</h1><p className="mt-1 text-sm text-slate-500">跨知识库、作品、工具与讨论版面查找内容</p></div>{(selectedTag || searchScope !== "all") && <button onClick={() => { setSelectedTag(""); setSearchScope("all"); }} className="rounded-full bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700">清除全部筛选</button>}</div>
+    <div className="mt-5 flex flex-col gap-3 sm:flex-row"><input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitSearch()} placeholder="输入关键词" className="flex-1 rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-blue-300" /><button onClick={() => setFiltersOpen(!filtersOpen)} className={`rounded-2xl px-5 py-3 font-bold ${filtersOpen || selectedTag || searchScope !== "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}>筛选</button><button onClick={() => submitSearch()} className="rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white">搜索</button></div>
+    <SearchFilters open={filtersOpen} selectedTag={selectedTag} setSelectedTag={setSelectedTag} searchScope={searchScope} setSearchScope={setSearchScope} allTags={allTags} />
+    <div className="mt-3 flex flex-wrap gap-2">{hotTerms.map((term) => <button key={term} onClick={() => setQuery(term)} className="rounded-full bg-blue-50 px-3 py-1 text-sm font-bold text-blue-700">{term}</button>)}</div>
+    {(selectedTag || searchScope !== "all") && <div className="mt-5 flex flex-wrap gap-2 text-sm"><span className="text-slate-400">当前条件</span>{searchScope !== "all" && <span className="rounded-full bg-slate-900 px-3 py-1 text-white">版面：{{ wiki: "知识库", works: "作品", tools: "工具", forum: "讨论", all: "全部" }[searchScope]}</span>}{selectedTag && <span className="rounded-full bg-blue-600 px-3 py-1 text-white">标签：#{selectedTag}</span>}</div>}
+    <div className="mt-6 space-y-3">{results.length ? results.map((item) => <article key={`${item.type}-${item.id}`} className="rounded-3xl border border-slate-100 bg-slate-50 p-5 hover:border-blue-200 hover:bg-blue-50"><button onClick={() => openResult(item)} className="block w-full text-left"><span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-blue-700">{item.type}</span><div className="mt-3 text-xl font-black">{item.title}</div><div className="mt-2 text-slate-600">{item.desc}</div></button><div className="mt-3 flex flex-wrap gap-2">{item.tags.map((tag) => <button key={tag} onClick={() => { setSelectedTag(tag); setSearchScope("all"); setQuery(""); }} className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600">#{tag}</button>)}</div></article>) : <div className="rounded-3xl bg-slate-50 p-8 text-center text-slate-500">没有符合当前关键词和筛选条件的内容。</div>}</div>
+  </section>;
 }
 
 function GallerySection({ works, setSection }: { works: Work[]; setSection: (s: Section) => void }) {
@@ -741,24 +791,24 @@ function ForumSection({ posts, setPosts, user, setNotice, openPost }: { posts: P
   return <section className="grid gap-6 lg:grid-cols-[280px_1fr]"><aside className="rounded-[1.75rem] bg-white p-5 shadow-xl"><h2 className="mb-3 text-xl font-black">讨论版块</h2>{boards.map((b) => <button key={b} onClick={() => setBoard(b)} className={`mb-2 w-full rounded-2xl px-4 py-3 text-left font-bold ${board === b ? "bg-blue-600 text-white" : "bg-slate-50 text-slate-600"}`}>{b}</button>)}</aside><div className="space-y-5"><div className="rounded-[1.75rem] bg-white p-5 shadow-xl"><h1 className="text-2xl font-black">{board}</h1><div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]"><input value={title} onChange={(e) => setTitle(e.target.value)} className="rounded-2xl border px-4 py-3" /><input value={content} onChange={(e) => setContent(e.target.value)} className="rounded-2xl border px-4 py-3" /><button disabled={user.role === "guest" || title.length < 5} onClick={() => { setPosts([{ id: Date.now(), board, title, content, author: user.nickname, replies: 0, likes: 0, createdAt: new Date().toISOString().slice(5, 10) }, ...posts]); setNotice("帖子已发布到对应版块。") }} className="rounded-2xl bg-blue-600 px-5 font-bold text-white disabled:bg-slate-300">发帖</button></div></div>{posts.filter((p) => p.board === board || p.pinned).map((post) => <button onClick={() => openPost(post.id)} key={post.id} className="block w-full rounded-[1.75rem] bg-white p-5 text-left shadow-xl transition hover:-translate-y-1"><div className="flex flex-wrap gap-2">{post.pinned && <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-600">置顶</span>}{post.featured && <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-600">精华</span>}<span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{post.board}</span></div><h2 className="mt-3 text-xl font-black">{post.title}</h2><p className="mt-2 text-slate-600">{post.content}</p><div className="mt-4 text-sm text-slate-400">{post.author} · {post.replies} 回复 · {post.likes} 赞 · {post.createdAt}</div></button>)}</div></section>;
 }
 
-function CommunityDetail({ type, item, comments, liked, onBack, onLike, onComment, canModerate, onDeleteComment }: { type: "post" | "work"; item: Post | Work; comments: CommunityComment[]; liked: boolean; onBack: () => void; onLike: () => void; onComment: (content: string) => boolean; canModerate: boolean; onDeleteComment: (id: number) => void }) {
+function CommunityDetail({ type, item, comments, liked, onBack, onLike, onComment, canModerate, onDeleteComment, onTagSearch }: { type: "post" | "work"; item: Post | Work; comments: CommunityComment[]; liked: boolean; onBack: () => void; onLike: () => void; onComment: (content: string) => boolean; canModerate: boolean; onDeleteComment: (id: number) => void; onTagSearch?: (tag: string) => void }) {
   const [content, setContent] = useState("");
   const isWork = type === "work";
   const work = isWork ? item as Work & { imageUrl?: string } : null;
   const post = !isWork ? item as Post : null;
-  return <section className="mx-auto max-w-4xl space-y-5"><button onClick={onBack} className="font-bold text-blue-600">← 返回{isWork ? "作品展示" : "讨论区"}</button><article className="overflow-hidden rounded-[2rem] bg-white shadow-xl">{work?.imageUrl ? <img src={work.imageUrl} alt={work.title} className="max-h-[520px] w-full object-cover" /> : work ? <div className={`h-72 bg-gradient-to-br ${work.color}`} /> : null}<div className="p-7"><div className="text-sm font-bold text-blue-600">{work ? `${work.kit} · ${work.author}` : `${post?.board} · ${post?.author}`}</div><h1 className="mt-3 text-4xl font-black">{item.title}</h1><p className="mt-5 whitespace-pre-wrap text-lg leading-8 text-slate-600">{work ? work.desc : post?.content}</p><div className="mt-6 flex items-center gap-3"><button onClick={onLike} className={`rounded-2xl px-5 py-3 font-bold ${liked ? "bg-red-600 text-white" : "bg-slate-100"}`}>{liked ? "♥ 已点赞" : "♡ 点赞"} · {item.likes}</button><span className="text-sm text-slate-400">{comments.length} 条评论</span></div></div></article><CommentComposer content={content} setContent={setContent} onSubmit={() => { if (content.trim() && onComment(content.trim())) setContent(""); }} /><CommentList comments={comments} canModerate={canModerate} onDelete={onDeleteComment} /></section>;
+  return <section className="mx-auto max-w-4xl space-y-5"><button onClick={onBack} className="font-bold text-blue-600">← 返回{isWork ? "作品展示" : "讨论区"}</button><article className="overflow-hidden rounded-[2rem] bg-white shadow-xl">{work?.imageUrl ? <img src={work.imageUrl} alt={work.title} className="max-h-[520px] w-full object-cover" /> : work ? <div className={`h-72 bg-gradient-to-br ${work.color}`} /> : null}<div className="p-7"><div className="text-sm font-bold text-blue-600">{work ? `${work.kit} · ${work.author}` : `${post?.board} · ${post?.author}`}</div><h1 className="mt-3 text-4xl font-black">{item.title}</h1>{work && <div className="mt-4 flex flex-wrap gap-2">{(work.tags ?? []).map((tag) => <button key={tag} onClick={() => onTagSearch?.(tag)} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">#{tag}</button>)}</div>}<p className="mt-5 whitespace-pre-wrap text-lg leading-8 text-slate-600">{work ? work.desc : post?.content}</p><div className="mt-6 flex items-center gap-3"><button onClick={onLike} className={`rounded-2xl px-5 py-3 font-bold ${liked ? "bg-red-600 text-white" : "bg-slate-100"}`}>{liked ? "♥ 已点赞" : "♡ 点赞"} · {item.likes}</button><span className="text-sm text-slate-400">{comments.length} 条评论</span></div></div></article><CommentComposer content={content} setContent={setContent} onSubmit={() => { if (content.trim() && onComment(content.trim())) setContent(""); }} /><CommentList comments={comments} canModerate={canModerate} onDelete={onDeleteComment} /></section>;
 }
 
-function ToolsSection({ tools, user, setTools, setNotice, openTool }: { tools: Tool[]; user: User; setTools: (tools: Tool[]) => void; setNotice: (notice: string) => void; openTool: (id: number) => void }) {
+function ToolsSection({ tools, user, setTools, setNotice, openTool, onTagSearch }: { tools: Tool[]; user: User; setTools: (tools: Tool[]) => void; setNotice: (notice: string) => void; openTool: (id: number) => void; onTagSearch: (tag: string) => void }) {
   const [showAdd, setShowAdd] = useState(false);
-  const [name, setName] = useState(""); const [brand, setBrand] = useState(""); const [category, setCategory] = useState(""); const [price, setPrice] = useState("");
-  function addTool() { if (!name.trim()) return; setTools([{ id: Date.now(), name, brand, category, price, rating: 0, reviews: 0, specs: [], pros: [] }, ...tools]); setShowAdd(false); setNotice("工具条目已添加到评测库。"); }
-  return <section><div className="mb-5 flex items-center justify-between"><h1 className="text-3xl font-black">工具评测库</h1>{user.role === "admin" && <button onClick={() => setShowAdd(!showAdd)} className="rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white">＋ 添加工具</button>}</div>{showAdd && <div className="mb-6 grid gap-3 rounded-[1.75rem] bg-white p-5 shadow-xl md:grid-cols-4"><Field label="工具名称" value={name} onChange={setName} /><Field label="品牌" value={brand} onChange={setBrand} /><Field label="分类" value={category} onChange={setCategory} /><Field label="参考价格" value={price} onChange={setPrice} /><button onClick={addTool} className="rounded-2xl bg-blue-600 py-3 font-bold text-white md:col-span-4">保存工具条目</button></div>}<div className="grid gap-5 lg:grid-cols-3">{tools.map((tool) => <button onClick={() => openTool(tool.id)} key={tool.id} className="rounded-[1.75rem] bg-white p-5 text-left shadow-xl transition hover:-translate-y-1"><div className="text-sm font-bold text-blue-600">{tool.brand} · {tool.category}</div><h2 className="mt-2 text-2xl font-black">{tool.name}</h2><div className="mt-4 flex items-end gap-2"><span className="text-4xl font-black text-amber-500">{tool.rating}</span><span className="pb-1 text-sm text-slate-400">/ 5 · {tool.reviews}条评价</span></div><div className="mt-4 rounded-2xl bg-slate-50 p-4"><div className="font-bold">参考价格：{tool.price}</div><div className="mt-3 flex flex-wrap gap-2">{tool.specs.map((spec) => <span key={spec} className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600">{spec}</span>)}</div></div><div className="mt-4 text-sm text-slate-600">优点：{tool.pros.join("、") || "等待用户评价"}</div></button>)}</div></section>;
+  const [name, setName] = useState(""); const [brand, setBrand] = useState(""); const [category, setCategory] = useState(""); const [price, setPrice] = useState(""); const [tagText, setTagText] = useState("");
+  function addTool() { if (!name.trim()) return; setTools([{ id: Date.now(), name, brand, category, price, rating: 0, reviews: 0, specs: [], pros: [], tags: tagText.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean) }, ...tools]); setShowAdd(false); setName(""); setTagText(""); setNotice("工具条目已添加到评测库。"); }
+  return <section><div className="mb-5 flex items-center justify-between"><h1 className="text-3xl font-black">工具评测库</h1>{user.role === "admin" && <button onClick={() => setShowAdd(!showAdd)} className="rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white">＋ 添加工具</button>}</div>{showAdd && <div className="mb-6 grid gap-3 rounded-[1.75rem] bg-white p-5 shadow-xl md:grid-cols-4"><Field label="工具名称" value={name} onChange={setName} /><Field label="品牌" value={brand} onChange={setBrand} /><Field label="分类" value={category} onChange={setCategory} /><Field label="参考价格" value={price} onChange={setPrice} /><div className="md:col-span-4"><Field label="自定义标签（使用逗号分隔）" value={tagText} onChange={setTagText} /></div><button onClick={addTool} className="rounded-2xl bg-blue-600 py-3 font-bold text-white md:col-span-4">保存工具条目</button></div>}<div className="grid gap-5 lg:grid-cols-3">{tools.map((tool) => <article key={tool.id} className="rounded-[1.75rem] bg-white p-5 text-left shadow-xl transition hover:-translate-y-1"><button onClick={() => openTool(tool.id)} className="block w-full text-left"><div className="text-sm font-bold text-blue-600">{tool.brand} · {tool.category}</div><h2 className="mt-2 text-2xl font-black">{tool.name}</h2><div className="mt-4 flex items-end gap-2"><span className="text-4xl font-black text-amber-500">{tool.rating}</span><span className="pb-1 text-sm text-slate-400">/ 5 · {tool.reviews}条评价</span></div><div className="mt-4 rounded-2xl bg-slate-50 p-4"><div className="font-bold">参考价格：{tool.price}</div><div className="mt-3 flex flex-wrap gap-2">{tool.specs.map((spec) => <span key={spec} className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600">{spec}</span>)}</div></div><div className="mt-4 text-sm text-slate-600">优点：{tool.pros.join("、") || "等待用户评价"}</div></button><div className="mt-4 flex flex-wrap gap-2">{(tool.tags ?? []).map((tag) => <button key={tag} onClick={() => onTagSearch(tag)} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">#{tag}</button>)}</div></article>)}</div></section>;
 }
 
-function ToolDetail({ tool, comments, onBack, onReview, canModerate, onDeleteComment }: { tool: Tool; comments: CommunityComment[]; onBack: () => void; onReview: (content: string, rating: number) => boolean; canModerate: boolean; onDeleteComment: (id: number) => void }) {
+function ToolDetail({ tool, comments, onBack, onReview, canModerate, onDeleteComment, onTagSearch }: { tool: Tool; comments: CommunityComment[]; onBack: () => void; onReview: (content: string, rating: number) => boolean; canModerate: boolean; onDeleteComment: (id: number) => void; onTagSearch: (tag: string) => void }) {
   const [content, setContent] = useState(""); const [rating, setRating] = useState(5);
-  return <section className="mx-auto max-w-4xl space-y-5"><button onClick={onBack} className="font-bold text-blue-600">← 返回工具评测库</button><article className="rounded-[2rem] bg-white p-8 shadow-xl"><div className="text-sm font-bold text-blue-600">{tool.brand} · {tool.category}</div><h1 className="mt-3 text-4xl font-black">{tool.name}</h1><div className="mt-6 flex items-center gap-4"><span className="text-6xl font-black text-amber-500">{tool.rating}</span><div><div className="text-2xl text-amber-500">★★★★★</div><div className="text-sm text-slate-400">来自 {tool.reviews} 条用户评价</div></div></div><div className="mt-6 rounded-3xl bg-slate-50 p-5"><b>参考价格：{tool.price}</b><p className="mt-3 text-slate-600">规格：{tool.specs.join("、") || "暂无"}</p><p className="mt-2 text-slate-600">优点：{tool.pros.join("、") || "等待用户补充"}</p></div></article><div className="rounded-[1.75rem] bg-white p-5 shadow-xl"><h2 className="text-xl font-black">发表评价</h2><div className="my-4 flex gap-2">{[1,2,3,4,5].map((value) => <button key={value} onClick={() => setRating(value)} className={`text-3xl ${value <= rating ? "text-amber-500" : "text-slate-300"}`}>★</button>)}</div><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="分享你的实际使用体验" className="h-28 w-full rounded-2xl border p-4" /><button onClick={() => { if (content.trim() && onReview(content.trim(), rating)) setContent(""); }} className="mt-3 rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white">提交 {rating} 星评价</button></div><CommentList comments={comments} canModerate={canModerate} onDelete={onDeleteComment} /></section>;
+  return <section className="mx-auto max-w-4xl space-y-5"><button onClick={onBack} className="font-bold text-blue-600">← 返回工具评测库</button><article className="rounded-[2rem] bg-white p-8 shadow-xl"><div className="text-sm font-bold text-blue-600">{tool.brand} · {tool.category}</div><h1 className="mt-3 text-4xl font-black">{tool.name}</h1><div className="mt-4 flex flex-wrap gap-2">{(tool.tags ?? []).map((tag) => <button key={tag} onClick={() => onTagSearch(tag)} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">#{tag}</button>)}</div><div className="mt-6 flex items-center gap-4"><span className="text-6xl font-black text-amber-500">{tool.rating}</span><div><div className="text-2xl text-amber-500">★★★★★</div><div className="text-sm text-slate-400">来自 {tool.reviews} 条用户评价</div></div></div><div className="mt-6 rounded-3xl bg-slate-50 p-5"><b>参考价格：{tool.price}</b><p className="mt-3 text-slate-600">规格：{tool.specs.join("、") || "暂无"}</p><p className="mt-2 text-slate-600">优点：{tool.pros.join("、") || "等待用户补充"}</p></div></article><div className="rounded-[1.75rem] bg-white p-5 shadow-xl"><h2 className="text-xl font-black">发表评价</h2><div className="my-4 flex gap-2">{[1,2,3,4,5].map((value) => <button key={value} onClick={() => setRating(value)} className={`text-3xl ${value <= rating ? "text-amber-500" : "text-slate-300"}`}>★</button>)}</div><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="分享你的实际使用体验" className="h-28 w-full rounded-2xl border p-4" /><button onClick={() => { if (content.trim() && onReview(content.trim(), rating)) setContent(""); }} className="mt-3 rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white">提交 {rating} 星评价</button></div><CommentList comments={comments} canModerate={canModerate} onDelete={onDeleteComment} /></section>;
 }
 
 function CommentComposer({ content, setContent, onSubmit }: { content: string; setContent: (content: string) => void; onSubmit: () => void }) {
@@ -798,15 +848,15 @@ function ProfileSection({ user, wiki, works, posts, onChangeUsername }: { user: 
   return <section className="space-y-6"><div className="rounded-[2rem] bg-white p-8 shadow-xl"><div className="flex flex-col gap-5 md:flex-row md:items-center"><div className="grid h-24 w-24 place-items-center rounded-3xl bg-blue-600 text-4xl font-black text-white">{user.nickname[0]}</div><div><h1 className="text-3xl font-black">@{user.username}</h1><p className="mt-2 text-slate-500">{roleText[user.role]} · 贡献积分 {user.score}</p><div className="mt-3 flex flex-wrap gap-2">{["初入模界", "创始贡献者", "社交新星"].map((badge) => <span key={badge} className="rounded-full bg-amber-50 px-3 py-1 text-sm font-bold text-amber-700">{badge}</span>)}</div></div></div><div className="mt-8 grid gap-4 md:grid-cols-3">{[["参与条目", wiki.length], ["发布作品", works.filter((work) => work.author === user.username).length], ["发起讨论", posts.filter((post) => post.author === user.username).length]].map(([key, value]) => <div key={key} className="rounded-3xl bg-slate-50 p-5"><div className="text-sm font-bold text-slate-400">{key}</div><div className="mt-2 text-3xl font-black text-blue-600">{value}</div></div>)}</div></div>{user.role !== "guest" && <div className="rounded-[2rem] bg-white p-7 shadow-xl"><div className="text-xs font-bold tracking-[.25em] text-blue-600">ACCOUNT IDENTITY</div><h2 className="mt-2 text-2xl font-black">修改用户名</h2><p className="mt-2 text-sm text-slate-500">用户名全站唯一，支持 2–24 位文字、数字和下划线。</p><div className="mt-5 flex flex-col gap-3 sm:flex-row"><input value={username} onChange={(event) => setUsername(event.target.value)} className="flex-1 rounded-2xl border px-4 py-3" /><button disabled={saving || username.trim() === user.username} onClick={save} className="rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white disabled:bg-slate-300">{saving ? "检查并保存…" : "保存新用户名"}</button></div></div>}</section>;
 }
 
-function CloudGallerySection({ works, setSection, openWork }: { works: Work[]; setSection: (section: Section) => void; openWork: (id: number) => void }) {
+function CloudGallerySection({ works, setSection, openWork, onTagSearch }: { works: Work[]; setSection: (section: Section) => void; openWork: (id: number) => void; onTagSearch: (tag: string) => void }) {
   return <section>
     <div className="mb-5 flex items-center justify-between"><h1 className="text-3xl font-black">作品展示</h1><button onClick={() => setSection("publish")} className="rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white">发布作品</button></div>
     <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">{works.map((work) => {
       const imageUrl = (work as Work & { imageUrl?: string }).imageUrl;
-      return <button onClick={() => openWork(work.id)} key={work.id} className="overflow-hidden rounded-[1.75rem] bg-white text-left shadow-xl transition hover:-translate-y-1">
-        {imageUrl ? <img src={imageUrl} alt={work.title} className="h-52 w-full object-cover" /> : <div className={`h-52 bg-gradient-to-br ${work.color}`} />}
-        <div className="p-5"><div className="text-xl font-black">{work.title}</div><div className="mt-1 text-sm text-slate-500">{work.kit} · by {work.author}</div><p className="mt-3 text-slate-600">{work.desc}</p><div className="mt-4 flex flex-wrap gap-2">{work.tags.map((tag) => <span key={tag} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{tag}</span>)}</div><div className="mt-4 text-sm text-slate-400">♥ {work.likes} · 评论 {work.comments} · {work.createdAt}</div></div>
-      </button>;
+      return <article key={work.id} className="overflow-hidden rounded-[1.75rem] bg-white text-left shadow-xl transition hover:-translate-y-1">
+        <button onClick={() => openWork(work.id)} className="block w-full text-left">{imageUrl ? <img src={imageUrl} alt={work.title} className="h-52 w-full object-cover" /> : <div className={`h-52 bg-gradient-to-br ${work.color}`} />}<div className="px-5 pt-5"><div className="text-xl font-black">{work.title}</div><div className="mt-1 text-sm text-slate-500">{work.kit} · by {work.author}</div><p className="mt-3 text-slate-600">{work.desc}</p></div></button>
+        <div className="flex flex-wrap gap-2 px-5 pt-4">{(work.tags ?? []).map((tag) => <button key={tag} onClick={() => onTagSearch(tag)} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-700">#{tag}</button>)}</div><div className="px-5 pb-5 pt-4 text-sm text-slate-400">♥ {work.likes} · 评论 {work.comments} · {work.createdAt}</div>
+      </article>;
     })}</div>
   </section>;
 }
