@@ -377,6 +377,7 @@ function AuthControls({ currentEmail, onAuth }: { currentEmail: string | null; o
     <button disabled={!email || password.length < 6} onClick={() => onAuth("signin", email, password)} className="rounded-full bg-blue-600 px-3 py-2 text-xs font-bold text-white disabled:bg-slate-300">登录</button>
     <button disabled={!email || password.length < 6} onClick={() => onAuth("signup", email, password)} className="rounded-full border border-blue-200 px-3 py-2 text-xs font-bold text-blue-700 disabled:text-slate-300">注册</button>
   </div>;
+}
 
 function HomeSection({ wiki, works, posts, hotTerms, query, setQuery, submitSearch, openWiki, setSection }: { wiki: WikiPage[]; works: Work[]; posts: Post[]; hotTerms: string[]; query: string; setQuery: (q: string) => void; submitSearch: (value?: string) => void; openWiki: (id: number) => void; setSection: (s: Section) => void }) {
   return (
