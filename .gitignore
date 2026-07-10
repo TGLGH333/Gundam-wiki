@@ -43,3 +43,8 @@ next-env.d.ts
 # luffy: SQLite 本地数据目录与运行日志
 data/
 *.log
+
+# Cloudflare Workers / OpenNext
+.open-next/
+.wrangler/
+cloudflare-env.d.ts
