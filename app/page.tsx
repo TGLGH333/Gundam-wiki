@@ -146,6 +146,11 @@ function readStore<T>(key: string, fallback: T): T {
   }
 }
 
+function readListStore<T>(key: string, fallback: T[]): T[] {
+  const value = readStore<unknown>(key, fallback);
+  return Array.isArray(value) && value.length > 0 ? value as T[] : fallback;
+}
+
 function writeStore<T>(key: string, value: T) {
   if (typeof window !== "undefined") localStorage.setItem(key, JSON.stringify(value));
 }
@@ -216,10 +221,10 @@ export default function Home() {
   }
 
   useEffect(() => {
-    setWiki(readStore("gundam_wiki_pages", seedWiki));
-    setRevisions(readStore("gundam_wiki_revisions", seedRevisions));
-    setWorks(readStore("gundam_wiki_works", seedWorks));
-    setPosts(readStore("gundam_wiki_posts", seedPosts));
+    setWiki(readListStore("gundam_wiki_pages", seedWiki));
+    setRevisions(readListStore("gundam_wiki_revisions", seedRevisions));
+    setWorks(readListStore("gundam_wiki_works", seedWorks));
+    setPosts(readListStore("gundam_wiki_posts", seedPosts));
     setComments(readStore("gundam_community_comments", []));
     setLikes(readStore("gundam_community_likes", []));
     const storedUser = readStore<User>("gundam_wiki_user", { id: "guest", username: "guest", nickname: "游客", role: "guest", score: 0, status: "active" });
@@ -237,7 +242,17 @@ export default function Home() {
       supabase.from("community_likes").select("*").order("id"),
       supabase.auth.getUser(),
     ]).then(([wikiResult, revisionResult, workResult, postResult, toolResult, commentResult, likeResult, authResult]) => {
-      if (wikiResult.data?.length) setWiki(wikiResult.data.map((item: RemoteWikiPage) => ({ ...item, imageUrl: item.image_url, updatedAt: item.updated_at })) as WikiPage[]);
+      if (wikiResult.data?.length) setWiki(wikiResult.data.map((item: RemoteWikiPage) => ({
+        ...item,
+        tags: Array.isArray(item.tags) ? item.tags : [],
+        content: item.content ?? "",
+        summary: item.summary ?? "",
+        views: item.views ?? 0,
+        likes: item.likes ?? 0,
+        revision: item.revision ?? 1,
+        imageUrl: item.image_url,
+        updatedAt: item.updated_at ?? new Date().toISOString().slice(0, 10),
+      })) as WikiPage[]);
       if (revisionResult.data?.length) setRevisions(revisionResult.data.map((item: RemoteRevision) => ({ id: item.id, pageId: item.page_id, revision: item.revision, content: item.content, summary: item.summary, editor: item.editor, status: item.status, imageUrl: item.image_url, createdAt: item.created_at })) as Revision[]);
       if (workResult.data?.length) setWorks(workResult.data.map((item: RemoteWork) => ({ id: item.id, title: item.title, kit: item.kit, desc: item.description, tags: item.tags, author: item.author, likes: item.likes, comments: item.comments, color: item.color, imageUrl: item.image_url, createdAt: item.created_at })) as Work[]);
       if (postResult.data?.length) setPosts(postResult.data.map((item: RemotePost) => ({ id: item.id, board: item.board, title: item.title, content: item.content, author: item.author, replies: item.replies, likes: item.likes, pinned: item.pinned, featured: item.featured, createdAt: item.created_at })) as Post[]);
@@ -490,7 +505,7 @@ export default function Home() {
 
         {section === "login" && <LoginSection supabaseEnabled={supabaseEnabled} onAuth={handleSupabaseAuth} />}
         {section === "home" && <HomeSection wiki={wiki} works={works} posts={posts} hotTerms={hotTerms} query={query} setQuery={setQuery} submitSearch={submitSearch} openWiki={openWiki} setSection={setSection} />}
-        {section === "wiki" && <WikiSection page={selectedWiki} pages={wiki} revisions={revisions.filter((item) => item.pageId === selectedWiki.id)} user={user} editing={editing} setEditing={setEditing} compare={compare} setCompare={setCompare} onSelect={openWiki} supabaseEnabled={supabaseEnabled} setNotice={setNotice} onSave={(nextContent, summary, imageUrl) => {
+        {section === "wiki" && selectedWiki && <WikiSection page={selectedWiki} pages={wiki} revisions={revisions.filter((item) => item.pageId === selectedWiki.id)} user={user} editing={editing} setEditing={setEditing} compare={compare} setCompare={setCompare} onSelect={openWiki} supabaseEnabled={supabaseEnabled} setNotice={setNotice} onSave={(nextContent, summary, imageUrl) => {
           const nextRev = selectedWiki.revision + 1;
           const needReview = user.role === "user";
           setWiki((list) => list.map((item) => item.id === selectedWiki.id ? { ...item, content: needReview ? item.content : nextContent, imageUrl: needReview ? item.imageUrl : imageUrl, revision: needReview ? item.revision : nextRev, status: needReview ? "pending" : item.status, updatedAt: new Date().toISOString().slice(0, 10) } : item));
@@ -498,6 +513,7 @@ export default function Home() {
           setEditing(false);
           setNotice(needReview ? "编辑已进入审核队列，管理员通过后会发布。" : "条目已发布新版本，版本历史已同步记录。")
         }} />}
+        {section === "wiki" && !selectedWiki && <section className="rounded-[2rem] bg-white p-10 text-center shadow-xl"><h1 className="text-2xl font-black">知识库正在恢复</h1><p className="mt-3 text-slate-500">暂未读取到有效条目，请重新加载默认内容。</p><button onClick={() => { setWiki(seedWiki); setSelectedWikiId(seedWiki[0].id); }} className="mt-5 rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white">恢复默认条目</button></section>}
         {section === "search" && <SearchSection query={query} setQuery={setQuery} results={searchResults} hotTerms={hotTerms} submitSearch={submitSearch} openWiki={openWiki} setSection={setSection} />}
         {section === "gallery" && <CloudGallerySection works={works} setSection={setSection} openWork={openWork} />}
         {section === "work-detail" && selectedWork && <CommunityDetail type="work" item={selectedWork} comments={comments.filter((comment) => comment.targetType === "work" && comment.targetId === selectedWork.id)} liked={likes.some((like) => like.targetType === "work" && like.targetId === selectedWork.id && like.userId === user.id)} onBack={() => setSection("gallery")} onLike={() => toggleLike("work", selectedWork.id)} onComment={(content) => addComment("work", selectedWork.id, content)} canModerate={user.role === "admin"} onDeleteComment={deleteComment} />}
