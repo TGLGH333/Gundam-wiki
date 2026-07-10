@@ -192,6 +192,7 @@ create table if not exists public.forum_posts (
   board text not null,
   title text not null,
   content text not null,
+  tags jsonb not null default '[]'::jsonb,
   author text not null,
   replies integer not null default 0,
   likes integer not null default 0,
@@ -213,6 +214,7 @@ create table if not exists public.tools (
   tags jsonb not null default '[]'::jsonb
 );
 
+alter table public.forum_posts add column if not exists tags jsonb not null default '[]'::jsonb;
 alter table public.tools add column if not exists tags jsonb not null default '[]'::jsonb;
 alter table public.wiki_pages add column if not exists image_url text;
 alter table public.wiki_revisions add column if not exists image_url text;
