@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 type Role = "guest" | "user" | "editor" | "admin";
 type Section = "home" | "wiki" | "search" | "gallery" | "publish" | "forum" | "tools" | "admin" | "profile";
@@ -164,13 +165,16 @@ export default function Home() {
   const [revisions, setRevisions] = useState<Revision[]>(seedRevisions);
   const [works, setWorks] = useState<Work[]>(seedWorks);
   const [posts, setPosts] = useState<Post[]>(seedPosts);
-  const [tools] = useState<Tool[]>(seedTools);
+  const [tools, setTools] = useState<Tool[]>(seedTools);
   const [selectedWikiId, setSelectedWikiId] = useState(1);
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState(false);
   const [compare, setCompare] = useState(false);
+  const [remoteLoaded, setRemoteLoaded] = useState(false);
+  const [supabaseUser, setSupabaseUser] = useState<string | null>(null);
+  const supabaseEnabled = isSupabaseConfigured();
   const [user, setUser] = useState<User>({ username: "guest", nickname: "游客", role: "guest", score: 0 });
-  const [notice, setNotice] = useState("页面功能已就绪，内容会保存在当前浏览器中。");
+  const [notice, setNotice] = useState(supabaseEnabled ? "正在连接 Supabase…" : "尚未配置 Supabase，当前使用浏览器本地数据。");
 
   useEffect(() => {
     setWiki(readStore("gundam_wiki_pages", seedWiki));
@@ -178,6 +182,41 @@ export default function Home() {
     setWorks(readStore("gundam_wiki_works", seedWorks));
     setPosts(readStore("gundam_wiki_posts", seedPosts));
     setUser(readStore("gundam_wiki_user", { username: "guest", nickname: "游客", role: "guest", score: 0 }));
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return;
+
+    Promise.all([
+      supabase.from("wiki_pages").select("*").order("id"),
+      supabase.from("wiki_revisions").select("*").order("revision"),
+      supabase.from("works").select("*").order("id", { ascending: false }),
+      supabase.from("forum_posts").select("*").order("id", { ascending: false }),
+      supabase.from("tools").select("*").order("rating", { ascending: false }),
+      supabase.auth.getUser(),
+    ]).then(([wikiResult, revisionResult, workResult, postResult, toolResult, authResult]) => {
+      if (wikiResult.data?.length) setWiki(wikiResult.data.map((item) => ({ ...item, updatedAt: item.updated_at })) as WikiPage[]);
+      if (revisionResult.data?.length) setRevisions(revisionResult.data.map((item) => ({ id: item.id, pageId: item.page_id, revision: item.revision, content: item.content, summary: item.summary, editor: item.editor, status: item.status, createdAt: item.created_at })) as Revision[]);
+      if (workResult.data?.length) setWorks(workResult.data.map((item) => ({ id: item.id, title: item.title, kit: item.kit, desc: item.description, tags: item.tags, author: item.author, likes: item.likes, comments: item.comments, color: item.color, imageUrl: item.image_url, createdAt: item.created_at })) as Work[]);
+      if (postResult.data?.length) setPosts(postResult.data.map((item) => ({ id: item.id, board: item.board, title: item.title, content: item.content, author: item.author, replies: item.replies, likes: item.likes, pinned: item.pinned, featured: item.featured, createdAt: item.created_at })) as Post[]);
+      if (toolResult.data?.length) setTools(toolResult.data as Tool[]);
+      if (authResult.data.user?.email) {
+        setSupabaseUser(authResult.data.user.email);
+        setUser({ username: authResult.data.user.id, nickname: authResult.data.user.email.split("@")[0], role: "user", score: 10 });
+      }
+      setRemoteLoaded(true);
+      setNotice("Supabase 已连接，云端内容与账号服务可用。");
+    }).catch(() => {
+      setRemoteLoaded(false);
+      setNotice("Supabase 暂时不可用，已切换到浏览器本地数据。");
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const email = session?.user.email ?? null;
+      setSupabaseUser(email);
+      if (email) setUser({ username: session!.user.id, nickname: email.split("@")[0], role: "user", score: 10 });
+      else setUser({ username: "guest", nickname: "游客", role: "guest", score: 0 });
+    });
+
+    return () => authListener.subscription.unsubscribe();
   }, []);
 
   useEffect(() => writeStore("gundam_wiki_pages", wiki), [wiki]);
@@ -185,6 +224,21 @@ export default function Home() {
   useEffect(() => writeStore("gundam_wiki_works", works), [works]);
   useEffect(() => writeStore("gundam_wiki_posts", posts), [posts]);
   useEffect(() => writeStore("gundam_wiki_user", user), [user]);
+
+  useEffect(() => {
+    if (!remoteLoaded || !supabaseUser) return;
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return;
+    const timer = window.setTimeout(async () => {
+      const wikiRows = wiki.map(({ updatedAt, ...item }) => ({ ...item, updated_at: updatedAt }));
+      const revisionRows = revisions.map((item) => ({ id: item.id, page_id: item.pageId, revision: item.revision, content: item.content, summary: item.summary, editor: item.editor, status: item.status, created_at: item.createdAt }));
+      const workRows = works.map((item) => ({ id: item.id, title: item.title, kit: item.kit, description: item.desc, tags: item.tags, author: item.author, likes: item.likes, comments: item.comments, color: item.color, image_url: (item as Work & { imageUrl?: string }).imageUrl ?? null, created_at: item.createdAt }));
+      const postRows = posts.map((item) => ({ id: item.id, board: item.board, title: item.title, content: item.content, author: item.author, replies: item.replies, likes: item.likes, pinned: Boolean(item.pinned), featured: Boolean(item.featured), created_at: item.createdAt }));
+      const results = await Promise.all([supabase.from("wiki_pages").upsert(wikiRows), supabase.from("wiki_revisions").upsert(revisionRows), supabase.from("works").upsert(workRows), supabase.from("forum_posts").upsert(postRows)]);
+      if (results.some((result) => result.error)) setNotice("部分云端内容同步失败，本地副本仍然安全保存。");
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [wiki, revisions, works, posts, remoteLoaded, supabaseUser]);
 
   const selectedWiki = wiki.find((item) => item.id === selectedWikiId) ?? wiki[0];
   const hotTerms = ["RG元祖2.0", "渗线", "神之手剪钳", "MGEX强袭自由", "无缝处理"];
@@ -207,6 +261,24 @@ export default function Home() {
       .map((item) => ({ type: "工具", title: item.name, desc: `${item.brand} · ${item.category} · ${item.rating}分`, id: item.id }));
     return [...wikiResults, ...workResults, ...postResults, ...toolResults];
   }, [query, wiki, works, posts, tools]);
+
+  async function handleSupabaseAuth(action: "signin" | "signup" | "signout", email = "", password = "") {
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      setNotice("请先配置 Supabase 环境变量。");
+      return;
+    }
+    if (action === "signout") {
+      await supabase.auth.signOut();
+      setNotice("已退出云端账号。");
+      return;
+    }
+    const result = action === "signin"
+      ? await supabase.auth.signInWithPassword({ email, password })
+      : await supabase.auth.signUp({ email, password });
+    if (result.error) setNotice(result.error.message);
+    else setNotice(action === "signin" ? "登录成功，云端内容同步已开启。" : "注册成功，请按邮件提示完成验证。");
+  }
 
   function login(role: Role) {
     const next: User = role === "guest" ? { username: "guest", nickname: "游客", role, score: 0 } : { username: role === "admin" ? "admin" : role === "editor" ? "demo_editor" : "xiaoxing", nickname: roleText[role], role, score: role === "admin" ? 999 : role === "editor" ? 100 : 10 };
@@ -236,7 +308,7 @@ export default function Home() {
       </div>
 
       <div className="relative mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
-        <Header section={section} setSection={setSection} user={user} login={login} pendingCount={pendingCount} />
+        <Header section={section} setSection={setSection} user={user} login={login} pendingCount={pendingCount} supabaseEnabled={supabaseEnabled} supabaseUser={supabaseUser} onAuth={handleSupabaseAuth} />
         <div className="my-4 rounded-2xl border border-blue-100 bg-white/80 px-4 py-3 text-sm text-slate-600 shadow-sm backdrop-blur">{notice}</div>
 
         {section === "home" && <HomeSection wiki={wiki} works={works} posts={posts} hotTerms={hotTerms} query={query} setQuery={setQuery} submitSearch={submitSearch} openWiki={openWiki} setSection={setSection} />}
@@ -249,8 +321,8 @@ export default function Home() {
           setNotice(needReview ? "编辑已进入审核队列，管理员通过后会发布。" : "条目已发布新版本，版本历史已同步记录。")
         }} />}
         {section === "search" && <SearchSection query={query} setQuery={setQuery} results={searchResults} hotTerms={hotTerms} submitSearch={submitSearch} openWiki={openWiki} setSection={setSection} />}
-        {section === "gallery" && <GallerySection works={works} setSection={setSection} />}
-        {section === "publish" && <PublishSection user={user} works={works} setWorks={setWorks} setSection={setSection} setNotice={setNotice} />}
+        {section === "gallery" && <CloudGallerySection works={works} setSection={setSection} />}
+        {section === "publish" && <CloudPublishSection user={user} works={works} setWorks={setWorks} setSection={setSection} setNotice={setNotice} supabaseEnabled={supabaseEnabled} />}
         {section === "forum" && <ForumSection posts={posts} setPosts={setPosts} user={user} setNotice={setNotice} />}
         {section === "tools" && <ToolsSection tools={tools} />}
         {section === "admin" && <AdminSection user={user} wiki={wiki} setWiki={setWiki} revisions={revisions} setRevisions={setRevisions} pendingCount={pendingCount} setNotice={setNotice} />}
@@ -260,7 +332,7 @@ export default function Home() {
   );
 }
 
-function Header({ section, setSection, user, login, pendingCount }: { section: Section; setSection: (s: Section) => void; user: User; login: (r: Role) => void; pendingCount: number }) {
+function Header({ section, setSection, user, login, pendingCount, supabaseEnabled, supabaseUser, onAuth }: { section: Section; setSection: (s: Section) => void; user: User; login: (r: Role) => void; pendingCount: number; supabaseEnabled: boolean; supabaseUser: string | null; onAuth: (action: "signin" | "signup" | "signout", email?: string, password?: string) => Promise<void> }) {
   const nav: { key: Section; label: string }[] = [
     { key: "home", label: "首页" },
     { key: "wiki", label: "知识库" },
@@ -288,12 +360,23 @@ function Header({ section, setSection, user, login, pendingCount }: { section: S
         </nav>
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={() => setSection("profile")} className="rounded-2xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">{user.nickname} · {roleText[user.role]}</button>
-          {["guest", "user", "editor", "admin"].map((role) => <button key={role} onClick={() => login(role as Role)} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 hover:border-blue-300 hover:text-blue-700">{roleText[role as Role]}</button>)}
+          {supabaseEnabled ? <AuthControls currentEmail={supabaseUser} onAuth={onAuth} /> : ["guest", "user", "editor", "admin"].map((role) => <button key={role} onClick={() => login(role as Role)} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 hover:border-blue-300 hover:text-blue-700">{roleText[role as Role]}</button>)}
         </div>
       </div>
     </header>
   );
 }
+
+function AuthControls({ currentEmail, onAuth }: { currentEmail: string | null; onAuth: (action: "signin" | "signup" | "signout", email?: string, password?: string) => Promise<void> }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  if (currentEmail) return <button onClick={() => onAuth("signout")} className="rounded-full border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-700">{currentEmail} · 退出</button>;
+  return <div className="flex flex-wrap gap-2">
+    <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="邮箱" className="w-36 rounded-full border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-300" />
+    <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="密码" className="w-28 rounded-full border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-300" />
+    <button disabled={!email || password.length < 6} onClick={() => onAuth("signin", email, password)} className="rounded-full bg-blue-600 px-3 py-2 text-xs font-bold text-white disabled:bg-slate-300">登录</button>
+    <button disabled={!email || password.length < 6} onClick={() => onAuth("signup", email, password)} className="rounded-full border border-blue-200 px-3 py-2 text-xs font-bold text-blue-700 disabled:text-slate-300">注册</button>
+  </div>;
 
 function HomeSection({ wiki, works, posts, hotTerms, query, setQuery, submitSearch, openWiki, setSection }: { wiki: WikiPage[]; works: Work[]; posts: Post[]; hotTerms: string[]; query: string; setQuery: (q: string) => void; submitSearch: (value?: string) => void; openWiki: (id: number) => void; setSection: (s: Section) => void }) {
   return (
@@ -428,4 +511,51 @@ function AdminSection({ user, wiki, setWiki, revisions, setRevisions, pendingCou
 
 function ProfileSection({ user, wiki, works, posts }: { user: User; wiki: WikiPage[]; works: Work[]; posts: Post[] }) {
   return <section className="rounded-[2rem] bg-white p-8 shadow-xl shadow-slate-200/60"><div className="flex flex-col gap-5 md:flex-row md:items-center"><div className="grid h-24 w-24 place-items-center rounded-3xl bg-blue-600 text-4xl font-black text-white">{user.nickname[0]}</div><div><h1 className="text-3xl font-black">{user.nickname}</h1><p className="mt-2 text-slate-500">{roleText[user.role]} · 贡献积分 {user.score}</p><div className="mt-3 flex flex-wrap gap-2">{["初入模界", "创始贡献者", "社交新星"].map((a) => <span key={a} className="rounded-full bg-amber-50 px-3 py-1 text-sm font-bold text-amber-700">{a}</span>)}</div></div></div><div className="mt-8 grid gap-4 md:grid-cols-3">{[["参与条目", wiki.length], ["发布作品", works.filter((w) => w.author === user.nickname).length], ["发起讨论", posts.filter((p) => p.author === user.nickname).length]].map(([k, v]) => <div key={k} className="rounded-3xl bg-slate-50 p-5"><div className="text-sm font-bold text-slate-400">{k}</div><div className="mt-2 text-3xl font-black text-blue-600">{v}</div></div>)}</div></section>;
+}
+
+function CloudGallerySection({ works, setSection }: { works: Work[]; setSection: (section: Section) => void }) {
+  return <section>
+    <div className="mb-5 flex items-center justify-between"><h1 className="text-3xl font-black">作品展示</h1><button onClick={() => setSection("publish")} className="rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white">发布作品</button></div>
+    <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">{works.map((work) => {
+      const imageUrl = (work as Work & { imageUrl?: string }).imageUrl;
+      return <div key={work.id} className="overflow-hidden rounded-[1.75rem] bg-white shadow-xl shadow-slate-200/60">
+        {imageUrl ? <img src={imageUrl} alt={work.title} className="h-52 w-full object-cover" /> : <div className={`h-52 bg-gradient-to-br ${work.color}`} />}
+        <div className="p-5"><div className="text-xl font-black">{work.title}</div><div className="mt-1 text-sm text-slate-500">{work.kit} · by {work.author}</div><p className="mt-3 text-slate-600">{work.desc}</p><div className="mt-4 flex flex-wrap gap-2">{work.tags.map((tag) => <span key={tag} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{tag}</span>)}</div><div className="mt-4 text-sm text-slate-400">♥ {work.likes} · 评论 {work.comments} · {work.createdAt}</div></div>
+      </div>;
+    })}</div>
+  </section>;
+}
+
+function CloudPublishSection({ user, works, setWorks, setSection, setNotice, supabaseEnabled }: { user: User; works: Work[]; setWorks: (works: Work[]) => void; setSection: (section: Section) => void; setNotice: (notice: string) => void; supabaseEnabled: boolean }) {
+  const [title, setTitle] = useState("RG 元祖2.0 全喷涂改色");
+  const [kit, setKit] = useState("RG 元祖高达 Ver.2.0");
+  const [desc, setDesc] = useState("使用了郡士水性漆，主色为午夜蓝 + 钛白调配。");
+  const [tags, setTags] = useState("全喷涂,改色,RG");
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function publish() {
+    if (user.role === "guest") return setNotice("请先登录后再发布作品。");
+    if (file && file.size > 10 * 1024 * 1024) return setNotice("单张图片不能超过 10MB。");
+    setUploading(true);
+    let imageUrl: string | undefined;
+    if (file && supabaseEnabled) {
+      const supabase = createSupabaseBrowserClient();
+      const extension = file.name.split(".").pop() ?? "jpg";
+      const filePath = `${user.username}/${crypto.randomUUID()}.${extension}`;
+      const uploadResult = await supabase?.storage.from("works").upload(filePath, file, { upsert: false });
+      if (uploadResult?.error) { setUploading(false); setNotice(uploadResult.error.message); return; }
+      imageUrl = supabase?.storage.from("works").getPublicUrl(filePath).data.publicUrl;
+    }
+    const newWork = { id: Date.now(), title, kit, desc, tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean), author: user.nickname, likes: 0, comments: 0, color: "from-blue-700 to-indigo-400", imageUrl, createdAt: new Date().toISOString().slice(5, 10) } as Work;
+    setWorks([newWork, ...works]);
+    setUploading(false);
+    setNotice(supabaseEnabled ? "作品与图片已发布到 Supabase。" : "作品已保存在当前浏览器中。");
+    setSection("gallery");
+  }
+
+  return <section className="grid gap-6 lg:grid-cols-[1fr_320px]">
+    <div className="rounded-[2rem] bg-white p-6 shadow-xl shadow-slate-200/60"><h1 className="text-3xl font-black">发布作品</h1><div className="mt-6 space-y-4"><Field label="作品标题 *" value={title} onChange={setTitle} /><Field label="使用套件" value={kit} onChange={setKit} /><label className="block"><span className="text-sm font-bold text-slate-500">作品图片</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setFile(event.target.files?.[0] ?? null)} className="mt-2 block w-full rounded-2xl border border-dashed border-blue-200 bg-blue-50 p-5 text-sm text-blue-700" /><span className="mt-2 block text-xs text-slate-400">JPG、PNG 或 WebP，单张不超过 10MB</span></label><label className="block"><span className="text-sm font-bold text-slate-500">作品描述</span><textarea value={desc} onChange={(event) => setDesc(event.target.value)} className="mt-2 h-32 w-full rounded-2xl border border-slate-200 p-4 outline-none focus:border-blue-300" /></label></div></div>
+    <aside className="rounded-[2rem] bg-white p-6 shadow-xl shadow-slate-200/60"><h2 className="text-xl font-black">关联信息</h2><Field label="技法标签" value={tags} onChange={setTags} /><button disabled={uploading || user.role === "guest" || title.length < 2} onClick={publish} className="mt-5 w-full rounded-2xl bg-blue-600 py-4 font-bold text-white disabled:bg-slate-300">{uploading ? "上传中…" : user.role === "guest" ? "登录后发布" : "发布作品"}</button></aside>
+  </section>;
 }
