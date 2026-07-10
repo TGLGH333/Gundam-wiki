@@ -29,6 +29,10 @@ type Work = { id: number; title: string; kit: string; desc: string; tags: string
 type Post = { id: number; board: string; title: string; content: string; author: string; replies: number; likes: number; pinned?: boolean; featured?: boolean; createdAt: string };
 type Tool = { id: number; name: string; brand: string; category: string; price: string; rating: number; reviews: number; specs: string[]; pros: string[] };
 type User = { username: string; nickname: string; role: Role; score: number };
+type RemoteWikiPage = Omit<WikiPage, "updatedAt"> & { updated_at: string };
+type RemoteRevision = Omit<Revision, "pageId" | "createdAt"> & { page_id: number; created_at: string };
+type RemoteWork = Omit<Work, "desc" | "createdAt"> & { description: string; image_url?: string; created_at: string };
+type RemotePost = Omit<Post, "createdAt"> & { created_at: string };
 
 const categories = ["入门指南", "制作技法", "模型图鉴", "工具材料", "涂装技法", "改造进阶", "场景制作", "常见问题"];
 const boards = ["新套件讨论", "技法问答", "工具避雷", "作品交流", "涂装讨论", "改造创意", "站务公告", "自由讨论"];
@@ -204,10 +208,10 @@ export default function Home() {
       supabase.from("tools").select("*").order("rating", { ascending: false }),
       supabase.auth.getUser(),
     ]).then(([wikiResult, revisionResult, workResult, postResult, toolResult, authResult]) => {
-      if (wikiResult.data?.length) setWiki(wikiResult.data.map((item) => ({ ...item, updatedAt: item.updated_at })) as WikiPage[]);
-      if (revisionResult.data?.length) setRevisions(revisionResult.data.map((item) => ({ id: item.id, pageId: item.page_id, revision: item.revision, content: item.content, summary: item.summary, editor: item.editor, status: item.status, createdAt: item.created_at })) as Revision[]);
-      if (workResult.data?.length) setWorks(workResult.data.map((item) => ({ id: item.id, title: item.title, kit: item.kit, desc: item.description, tags: item.tags, author: item.author, likes: item.likes, comments: item.comments, color: item.color, imageUrl: item.image_url, createdAt: item.created_at })) as Work[]);
-      if (postResult.data?.length) setPosts(postResult.data.map((item) => ({ id: item.id, board: item.board, title: item.title, content: item.content, author: item.author, replies: item.replies, likes: item.likes, pinned: item.pinned, featured: item.featured, createdAt: item.created_at })) as Post[]);
+      if (wikiResult.data?.length) setWiki(wikiResult.data.map((item: RemoteWikiPage) => ({ ...item, updatedAt: item.updated_at })) as WikiPage[]);
+      if (revisionResult.data?.length) setRevisions(revisionResult.data.map((item: RemoteRevision) => ({ id: item.id, pageId: item.page_id, revision: item.revision, content: item.content, summary: item.summary, editor: item.editor, status: item.status, createdAt: item.created_at })) as Revision[]);
+      if (workResult.data?.length) setWorks(workResult.data.map((item: RemoteWork) => ({ id: item.id, title: item.title, kit: item.kit, desc: item.description, tags: item.tags, author: item.author, likes: item.likes, comments: item.comments, color: item.color, imageUrl: item.image_url, createdAt: item.created_at })) as Work[]);
+      if (postResult.data?.length) setPosts(postResult.data.map((item: RemotePost) => ({ id: item.id, board: item.board, title: item.title, content: item.content, author: item.author, replies: item.replies, likes: item.likes, pinned: item.pinned, featured: item.featured, createdAt: item.created_at })) as Post[]);
       if (toolResult.data?.length) setTools(toolResult.data as Tool[]);
       if (authResult.data.user?.email) void applyAuthenticatedUser(authResult.data.user);
       setRemoteLoaded(true);
