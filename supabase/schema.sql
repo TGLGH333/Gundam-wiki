@@ -111,9 +111,9 @@ create policy "public view work images" on storage.objects for select using (buc
 drop policy if exists "authenticated upload work images" on storage.objects;
 create policy "authenticated upload work images" on storage.objects for insert to authenticated with check (bucket_id = 'works');
 drop policy if exists "owners update work images" on storage.objects;
-create policy "owners update work images" on storage.objects for update to authenticated using (bucket_id = 'works' and owner_id = (select auth.uid())) with check (bucket_id = 'works');
+create policy "owners update work images" on storage.objects for update to authenticated using (bucket_id = 'works' and owner_id = (select auth.uid())::text) with check (bucket_id = 'works');
 drop policy if exists "owners delete work images" on storage.objects;
-create policy "owners delete work images" on storage.objects for delete to authenticated using (bucket_id = 'works' and owner_id = (select auth.uid()));
+create policy "owners delete work images" on storage.objects for delete to authenticated using (bucket_id = 'works' and owner_id = (select auth.uid())::text);
 
 insert into public.wiki_pages (id,title,slug,category,summary,content,tags,kit,grade,scale,release,price,views,likes,status,revision,updated_at) values
 (1,'RG 元祖高达 Ver.2.0','rg-rx78-2-ver2','模型图鉴','RG系列15周年纪念作品，采用全新进阶MS关节。','## 套件概览\nRG 元祖高达 Ver.2.0 是面向进阶玩家与素组玩家都很友好的套件。','["素组友好","RG","元祖","2024新品"]','RX-78-2 Gundam','RG','1/144','2024','3,500日元',24820,913,'published',3,'2026-07-09'),
