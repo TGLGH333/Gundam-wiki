@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "gundam-model-wiki",
+  "name": "gundamwiki",
   "main": ".open-next/worker.js",
   "build": {
     "command": "npx @opennextjs/cloudflare@latest build"
