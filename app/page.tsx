@@ -482,7 +482,7 @@ export default function Home() {
 
       <div className="relative mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
         <Header section={section} setSection={setSection} user={user} login={login} pendingCount={pendingCount} supabaseEnabled={supabaseEnabled} supabaseUser={supabaseUser} onAuth={handleSupabaseAuth} />
-        <div className="my-4 rounded-2xl border border-blue-100 bg-white/80 px-4 py-3 text-sm text-slate-600 shadow-sm backdrop-blur">{notice}</div>
+        <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-blue-100 bg-white/90 px-3 py-2 text-xs text-slate-600 shadow-lg backdrop-blur">{notice}</div>
 
         {section === "login" && <LoginSection supabaseEnabled={supabaseEnabled} onAuth={handleSupabaseAuth} />}
         {section === "home" && <HomeSection wiki={wiki} works={works} posts={posts} hotTerms={hotTerms} query={query} setQuery={setQuery} submitSearch={submitSearch} openWiki={openWiki} setSection={setSection} />}
@@ -511,37 +511,25 @@ export default function Home() {
 
 function Header({ section, setSection, user, login, pendingCount, supabaseEnabled, supabaseUser, onAuth }: { section: Section; setSection: (s: Section) => void; user: User; login: (r: Role) => void; pendingCount: number; supabaseEnabled: boolean; supabaseUser: string | null; onAuth: (action: "signin" | "signup" | "signout", email?: string, password?: string, portal?: "user" | "admin", username?: string) => Promise<void> }) {
   const nav: { key: Section; label: string }[] = [
-    { key: "home", label: "首页" },
-    { key: "wiki", label: "知识库" },
-    { key: "gallery", label: "作品" },
-    { key: "forum", label: "讨论" },
-    { key: "tools", label: "工具库" },
-    { key: "admin", label: "管理" },
+    { key: "home", label: "首页" }, { key: "wiki", label: "知识库" }, { key: "gallery", label: "作品" }, { key: "forum", label: "讨论" }, { key: "tools", label: "工具" }, { key: "admin", label: "管理" },
   ];
-  return (
-    <header className="sticky top-4 z-20 rounded-3xl border border-white/70 bg-white/85 px-4 py-3 shadow-xl shadow-blue-900/5 backdrop-blur-xl">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <button onClick={() => setSection("home")} className="flex items-center gap-3 text-left">
-          <span className="grid h-11 w-11 place-items-center rounded-2xl bg-blue-600 text-xl font-black text-white shadow-lg shadow-blue-600/25">G</span>
-          <span>
-            <span className="block text-lg font-black tracking-tight">高达模型制作Wiki</span>
-            <span className="text-xs text-slate-500">协作知识库 · 作品社区 · 工具评测</span>
-          </span>
+  return <header className="sticky top-3 z-20 mb-4 px-3 py-2 backdrop-blur-xl">
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <button onClick={() => setSection("home")} className="mr-1 flex items-center gap-2 rounded-xl px-1.5 py-1 text-left">
+          <span className="grid h-8 w-8 place-items-center rounded-full bg-blue-600 text-sm font-black text-white">G</span>
+          <span className="hidden text-sm font-black sm:block">GUNPLA WIKI</span>
         </button>
-        <nav className="flex flex-wrap gap-2">
-          {nav.map((item) => (
-            <button key={item.key} onClick={() => setSection(item.key)} className={`rounded-full px-4 py-2 text-sm font-semibold transition ${section === item.key ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700"}`}>
-              {item.label}{item.key === "admin" && pendingCount > 0 ? ` ${pendingCount}` : ""}
-            </button>
-          ))}
+        <nav className="flex flex-wrap gap-1">
+          {nav.map((item) => <button key={item.key} onClick={() => setSection(item.key)} className={`rounded-xl px-2.5 py-1.5 text-xs font-bold transition ${section === item.key ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700"}`}>{item.label}{item.key === "admin" && pendingCount > 0 ? ` ${pendingCount}` : ""}</button>)}
         </nav>
-        <div className="flex flex-wrap items-center gap-2">
-          <button onClick={() => setSection("profile")} className="rounded-2xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">{user.nickname} · {roleText[user.role]}</button>
-          {supabaseEnabled ? (supabaseUser ? <button onClick={() => onAuth("signout")} className="rounded-full border border-green-200 bg-green-50 px-4 py-2 text-xs font-bold text-green-700">退出登录</button> : <button onClick={() => setSection("login")} className="rounded-full bg-blue-600 px-5 py-2 text-xs font-bold text-white">登录 / 注册</button>) : ["guest", "user", "editor", "admin"].map((role) => <button key={role} onClick={() => login(role as Role)} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 hover:border-blue-300 hover:text-blue-700">{roleText[role as Role]}</button>)}
-        </div>
       </div>
-    </header>
-  );
+      <div className="flex shrink-0 items-center gap-1.5">
+        {supabaseEnabled ? (supabaseUser ? <button onClick={() => onAuth("signout")} className="hidden rounded-xl border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-500 sm:block">退出</button> : <button onClick={() => setSection("login")} className="rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-bold text-white">登录</button>) : <button onClick={() => login("admin")} className="rounded-xl bg-slate-100 px-2.5 py-1.5 text-xs font-bold">演示</button>}
+        <button onClick={() => setSection("profile")} className="rounded-xl bg-slate-900 px-3 py-1.5 text-xs font-bold text-white">@{user.username}</button>
+      </div>
+    </div>
+  </header>;
 }
 
 function AuthControls({ currentEmail, onAuth }: { currentEmail: string | null; onAuth: (action: "signin" | "signup" | "signout", email?: string, password?: string) => Promise<void> }) {
@@ -617,47 +605,26 @@ function LoginSection({ supabaseEnabled, onAuth }: { supabaseEnabled: boolean; o
 }
 
 function HomeSection({ wiki, works, posts, hotTerms, query, setQuery, submitSearch, openWiki, setSection }: { wiki: WikiPage[]; works: Work[]; posts: Post[]; hotTerms: string[]; query: string; setQuery: (q: string) => void; submitSearch: (value?: string) => void; openWiki: (id: number) => void; setSection: (s: Section) => void }) {
-  return (
-    <section className="space-y-6">
-      <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-        <div className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-blue-950 to-blue-700 p-8 text-white shadow-2xl shadow-blue-900/20">
-          <div className="mb-12 flex flex-wrap gap-3">
-            {categories.slice(0, 4).map((item) => <span key={item} className="rounded-full bg-white/10 px-4 py-2 text-sm backdrop-blur">{item}</span>)}
-          </div>
-          <h1 className="max-w-3xl text-4xl font-black leading-tight sm:text-6xl">从第一只 HG 到 GBWC 级作品的中文制作知识库</h1>
-          <p className="mt-5 max-w-2xl text-lg text-blue-100">集中沉淀教程、套件图鉴、工具评测与社区经验，让新手少踩坑，让老玩家快速找到可复用方案。</p>
-          <div className="mt-8 rounded-3xl bg-white p-2 shadow-2xl shadow-black/20 sm:flex">
-            <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitSearch()} placeholder="搜索任意模型、技法或工具，例如：RG元祖2.0 渗线 神之手剪钳" className="min-h-14 flex-1 rounded-2xl px-5 text-slate-900 outline-none" />
-            <button onClick={() => submitSearch()} className="w-full rounded-2xl bg-blue-600 px-8 py-4 font-bold text-white hover:bg-blue-700 sm:w-auto">开始搜索</button>
-          </div>
-          <div className="mt-4 flex flex-wrap gap-2 text-sm text-blue-100">
-            热门：{hotTerms.map((term) => <button key={term} onClick={() => { setQuery(term); submitSearch(term); }} className="rounded-full bg-white/10 px-3 py-1 hover:bg-white/20">{term}</button>)}
-          </div>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
-          {[{ label: "Wiki条目", value: "500+", text: "覆盖入门、技法、图鉴" }, { label: "贡献内容", value: "30%", text: "目标来自用户共建" }, { label: "审核时效", value: "24h", text: "普通编辑快速流转" }].map((item) => <div key={item.label} className="rounded-3xl border border-white bg-white p-6 shadow-xl shadow-slate-200/60"><div className="text-sm font-semibold text-slate-500">{item.label}</div><div className="mt-2 text-4xl font-black text-blue-600">{item.value}</div><div className="mt-2 text-sm text-slate-500">{item.text}</div></div>)}
-        </div>
-      </div>
+  return <section className="space-y-6">
+    <div className="rounded-[1.5rem] border border-white/20 bg-white p-2 shadow-xl sm:flex">
+      <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submitSearch()} placeholder="搜索模型、技法、作品、帖子或工具" className="min-h-12 flex-1 rounded-xl px-4 outline-none" />
+      <button onClick={() => submitSearch()} className="w-full rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white sm:w-auto">搜索</button>
+    </div>
+    <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-slate-500"><span>热门搜索</span>{hotTerms.map((term) => <button key={term} onClick={() => { setQuery(term); submitSearch(term); }} className="rounded-full border border-white/20 bg-white px-3 py-1.5 font-bold text-slate-600">{term}</button>)}</div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Panel title="热门条目" action="进入知识库" onAction={() => openWiki(wiki[0].id)}>
-          <div className="space-y-3">
-            {wiki.map((item, index) => <button key={item.id} onClick={() => openWiki(item.id)} className="flex w-full items-center gap-3 rounded-2xl bg-slate-50 p-3 text-left hover:bg-blue-50"><span className="grid h-9 w-9 place-items-center rounded-xl bg-blue-100 font-bold text-blue-700">{index + 1}</span><span><span className="block font-bold">{item.title}</span><span className="text-sm text-slate-500">{item.category} · {item.views.toLocaleString()}浏览</span></span></button>)}
-          </div>
-        </Panel>
-        <Panel title="最新作品" action="发布作品" onAction={() => setSection("publish")}>
-          <div className="grid gap-3">
-            {works.map((work) => <div key={work.id} className="flex gap-3 rounded-2xl bg-slate-50 p-3"><div className={`h-20 w-24 rounded-2xl bg-gradient-to-br ${work.color}`} /><div><div className="font-bold">{work.title}</div><div className="text-sm text-slate-500">{work.kit}</div><div className="mt-2 text-xs text-slate-400">♥ {work.likes} · 评论 {work.comments}</div></div></div>)}
-          </div>
-        </Panel>
-        <Panel title="社区动态" action="去讨论" onAction={() => setSection("forum")}>
-          <div className="space-y-3">
-            {posts.map((post) => <div key={post.id} className="rounded-2xl border border-slate-100 p-4"><div className="text-xs font-semibold text-blue-600">{post.board}</div><div className="mt-1 font-bold">{post.title}</div><div className="mt-2 text-xs text-slate-400">{post.replies} 回复 · {post.likes} 赞</div></div>)}
-          </div>
-        </Panel>
-      </div>
-    </section>
-  );
+    <div className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-blue-950 to-blue-700 p-8 text-white shadow-2xl sm:p-12">
+      <div className="mb-8 flex flex-wrap gap-2">{categories.slice(0, 4).map((item) => <span key={item} className="rounded-full bg-white/10 px-3 py-1.5 text-xs backdrop-blur">{item}</span>)}</div>
+      <h1 className="max-w-4xl text-4xl font-black leading-tight sm:text-6xl">高达模型制作知识与作品社区</h1>
+      <p className="mt-5 max-w-2xl text-base leading-7 text-blue-100 sm:text-lg">查找制作教程、套件资料与工具评价，也可以分享作品、参与讨论并共同完善知识库。</p>
+      <div className="mt-8 flex flex-wrap gap-3"><button onClick={() => openWiki(wiki[0].id)} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white">浏览知识库</button><button onClick={() => setSection("gallery")} className="rounded-xl border border-white/20 bg-white/10 px-5 py-3 text-sm font-bold text-white">查看作品</button></div>
+    </div>
+
+    <div className="grid gap-6 lg:grid-cols-3">
+      <Panel title="热门条目" action="进入知识库" onAction={() => openWiki(wiki[0].id)}><div className="space-y-3">{wiki.map((item, index) => <button key={item.id} onClick={() => openWiki(item.id)} className="flex w-full items-center gap-3 rounded-2xl bg-slate-50 p-3 text-left hover:bg-blue-50"><span className="grid h-8 w-8 place-items-center rounded-lg bg-blue-100 text-sm font-bold text-blue-700">{index + 1}</span><span><span className="block font-bold">{item.title}</span><span className="text-xs text-slate-500">{item.category} · {item.views.toLocaleString()} 浏览</span></span></button>)}</div></Panel>
+      <Panel title="最新作品" action="查看全部" onAction={() => setSection("gallery")}><div className="grid gap-3">{works.map((work) => <button onClick={() => setSection("gallery")} key={work.id} className="flex gap-3 rounded-2xl bg-slate-50 p-3 text-left"><div className={`h-16 w-20 rounded-xl bg-gradient-to-br ${work.color}`} /><div><div className="font-bold">{work.title}</div><div className="text-xs text-slate-500">{work.kit}</div><div className="mt-1 text-xs text-slate-400">♥ {work.likes} · 评论 {work.comments}</div></div></button>)}</div></Panel>
+      <Panel title="社区动态" action="去讨论" onAction={() => setSection("forum")}><div className="space-y-3">{posts.map((post) => <button onClick={() => setSection("forum")} key={post.id} className="block w-full rounded-2xl border border-slate-100 p-4 text-left"><div className="text-xs font-semibold text-blue-600">{post.board}</div><div className="mt-1 font-bold">{post.title}</div><div className="mt-2 text-xs text-slate-400">{post.replies} 回复 · {post.likes} 赞</div></button>)}</div></Panel>
+    </div>
+  </section>;
 }
 
 function Panel({ title, action, onAction, children }: { title: string; action?: string; onAction?: () => void; children: React.ReactNode }) {
