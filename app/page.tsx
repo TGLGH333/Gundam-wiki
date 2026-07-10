@@ -159,14 +159,16 @@ export default function Home() {
   const [revisions, setRevisions] = useState<Revision[]>(seedRevisions);
   const [works, setWorks] = useState<Work[]>(seedWorks);
   const [posts, setPosts] = useState<Post[]>(seedPosts);
-  const [tools] = useState<Tool[]>(seedTools);
+  const [tools, setTools] = useState<Tool[]>(seedTools);
   const [selectedWikiId, setSelectedWikiId] = useState(1);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("全部");
   const [editing, setEditing] = useState(false);
   const [compare, setCompare] = useState(false);
+  const [dbConnected, setDbConnected] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const [user, setUser] = useState<User>({ username: "guest", nickname: "游客", role: "guest", score: 0 });
-  const [notice, setNotice] = useState("已载入数据库种子内容：分类、技法、工具、论坛版块与示例账号。");
+  const [notice, setNotice] = useState("正在连接内容数据库…");
 
   useEffect(() => {
     setWiki(readStore("gundam_wiki_pages", seedWiki));
@@ -174,6 +176,25 @@ export default function Home() {
     setWorks(readStore("gundam_wiki_works", seedWorks));
     setPosts(readStore("gundam_wiki_posts", seedPosts));
     setUser(readStore("gundam_wiki_user", { username: "guest", nickname: "游客", role: "guest", score: 0 }));
+    fetch("/api/data")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("database unavailable");
+        return response.json();
+      })
+      .then((data) => {
+        if (data.wiki?.length) setWiki(data.wiki);
+        if (data.revisions) setRevisions(data.revisions);
+        if (data.works) setWorks(data.works);
+        if (data.posts) setPosts(data.posts);
+        if (data.tools?.length) setTools(data.tools);
+        setDbConnected(true);
+        setNotice("MySQL 已连接，条目编辑、作品发布和论坛内容会自动持久化。");
+      })
+      .catch(() => {
+        setDbConnected(false);
+        setNotice("当前预览环境未启动 MySQL，已自动使用本地数据；部署后会连接数据库服务。");
+      })
+      .finally(() => setHydrated(true));
   }, []);
 
   useEffect(() => writeStore("gundam_wiki_pages", wiki), [wiki]);
@@ -181,6 +202,14 @@ export default function Home() {
   useEffect(() => writeStore("gundam_wiki_works", works), [works]);
   useEffect(() => writeStore("gundam_wiki_posts", posts), [posts]);
   useEffect(() => writeStore("gundam_wiki_user", user), [user]);
+
+  useEffect(() => {
+    if (!hydrated || !dbConnected) return;
+    const timer = window.setTimeout(() => {
+      fetch("/api/data", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "sync", wiki, revisions, works, posts }) }).catch(() => setNotice("数据库同步暂时失败，页面数据已保留在本地。"));
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [wiki, revisions, works, posts, hydrated, dbConnected]);
 
   const selectedWiki = wiki.find((item) => item.id === selectedWikiId) ?? wiki[0];
   const hotTerms = ["RG元祖2.0", "渗线", "神之手剪钳", "MGEX强袭自由", "无缝处理"];
