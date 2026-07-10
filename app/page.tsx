@@ -192,11 +192,11 @@ export default function Home() {
   async function applyAuthenticatedUser(authUser: { id: string; email?: string }) {
     const supabase = createSupabaseBrowserClient();
     const profileResult = await supabase?.from("profiles").select("*").eq("id", authUser.id).single();
-    const profile = profileResult?.data as { display_name?: string; role?: "user" | "admin"; contribution_score?: number } | null;
+    const profile = profileResult?.data as { username?: string; display_name?: string; role?: "user" | "admin"; contribution_score?: number } | null;
     const role: Role = profile?.role === "admin" ? "admin" : "user";
     const email = authUser.email ?? "user@example.com";
     setSupabaseUser(email);
-    setUser({ username: authUser.id, nickname: profile?.display_name || email.split("@")[0], role, score: profile?.contribution_score ?? 0 });
+    setUser({ username: authUser.id, nickname: profile?.username || profile?.display_name || email.split("@")[0], role, score: profile?.contribution_score ?? 0 });
     return role;
   }
 
@@ -267,13 +267,11 @@ export default function Home() {
       const revisionRows = revisions.map((item) => ({ id: item.id, page_id: item.pageId, revision: item.revision, content: item.content, summary: item.summary, editor: item.editor, status: item.status, image_url: item.imageUrl ?? null, created_at: item.createdAt }));
       const workRows = works.map((item) => ({ id: item.id, title: item.title, kit: item.kit, description: item.desc, tags: item.tags, author: item.author, likes: item.likes, comments: item.comments, color: item.color, image_url: (item as Work & { imageUrl?: string }).imageUrl ?? null, created_at: item.createdAt }));
       const postRows = posts.map((item) => ({ id: item.id, board: item.board, title: item.title, content: item.content, author: item.author, replies: item.replies, likes: item.likes, pinned: Boolean(item.pinned), featured: Boolean(item.featured), created_at: item.createdAt }));
-      const commentRows = comments.map((item) => ({ id: item.id, target_type: item.targetType, target_id: item.targetId, author: item.author, user_id: item.userId, content: item.content, rating: item.rating ?? null, created_at: item.createdAt }));
-      const likeRows = likes.map((item) => ({ id: item.id, target_type: item.targetType, target_id: item.targetId, user_id: item.userId }));
-      const results = await Promise.all([supabase.from("wiki_pages").upsert(wikiRows), supabase.from("wiki_revisions").upsert(revisionRows), supabase.from("works").upsert(workRows), supabase.from("forum_posts").upsert(postRows), supabase.from("tools").upsert(tools), supabase.from("community_comments").upsert(commentRows), supabase.from("community_likes").upsert(likeRows)]);
+      const results = await Promise.all([...(user.role === "admin" ? [supabase.from("wiki_pages").upsert(wikiRows)] : []), supabase.from("wiki_revisions").upsert(revisionRows), supabase.from("works").upsert(workRows), supabase.from("forum_posts").upsert(postRows), supabase.from("tools").upsert(tools)]);
       if (results.some((result) => result.error)) setNotice("部分云端内容同步失败，本地副本仍然安全保存。");
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [wiki, revisions, works, posts, tools, comments, likes, remoteLoaded, supabaseUser]);
+  }, [wiki, revisions, works, posts, tools, remoteLoaded, supabaseUser, user.role]);
 
   const selectedWiki = wiki.find((item) => item.id === selectedWikiId) ?? wiki[0];
   const selectedPost = posts.find((item) => item.id === selectedPostId) ?? posts[0];
@@ -300,7 +298,7 @@ export default function Home() {
     return [...wikiResults, ...workResults, ...postResults, ...toolResults];
   }, [query, wiki, works, posts, tools]);
 
-  async function handleSupabaseAuth(action: "signin" | "signup" | "signout", email = "", password = "", portal: "user" | "admin" = "user") {
+  async function handleSupabaseAuth(action: "signin" | "signup" | "signout", email = "", password = "", portal: "user" | "admin" = "user", username = "") {
     const supabase = createSupabaseBrowserClient();
     if (!supabase) {
       setNotice("请先配置 Supabase 环境变量。");
@@ -313,7 +311,7 @@ export default function Home() {
       return;
     }
     if (action === "signup") {
-      const result = await supabase.auth.signUp({ email, password });
+      const result = await supabase.auth.signUp({ email, password, data: { username: username.trim(), display_name: username.trim() } });
       setNotice(result.error ? result.error.message : "注册成功，请前往邮箱完成验证后登录。");
       return;
     }
@@ -354,6 +352,7 @@ export default function Home() {
     const nextComment: CommunityComment = { id: Date.now(), targetType, targetId, author: user.nickname, userId: user.username, content, rating, createdAt: new Date().toLocaleString("zh-CN", { hour12: false }) };
     const nextComments = [...comments, nextComment];
     setComments(nextComments);
+    void createSupabaseBrowserClient()?.from("community_comments").upsert([{ id: nextComment.id, target_type: nextComment.targetType, target_id: nextComment.targetId, author: nextComment.author, user_id: nextComment.userId, content: nextComment.content, rating: nextComment.rating ?? null, created_at: nextComment.createdAt }]);
     if (targetType === "post") setPosts((list) => list.map((item) => item.id === targetId ? { ...item, replies: item.replies + 1 } : item));
     if (targetType === "work") setWorks((list) => list.map((item) => item.id === targetId ? { ...item, comments: item.comments + 1 } : item));
     if (targetType === "tool" && rating) {
@@ -370,10 +369,44 @@ export default function Home() {
     const id = `${targetType}-${targetId}-${user.username}`;
     const liked = likes.some((item) => item.id === id);
     if (liked) void createSupabaseBrowserClient()?.from("community_likes").delete().eq("id", id);
+    else void createSupabaseBrowserClient()?.from("community_likes").upsert([{ id, target_type: targetType, target_id: targetId, user_id: user.username }]);
     setLikes((list) => liked ? list.filter((item) => item.id !== id) : [...list, { id, targetType, targetId, userId: user.username }]);
     if (targetType === "post") setPosts((list) => list.map((item) => item.id === targetId ? { ...item, likes: Math.max(0, item.likes + (liked ? -1 : 1)) } : item));
     else setWorks((list) => list.map((item) => item.id === targetId ? { ...item, likes: Math.max(0, item.likes + (liked ? -1 : 1)) } : item));
     setNotice(liked ? "已取消点赞。" : "点赞成功。");
+  }
+
+  function deleteComment(id: number) {
+    if (user.role !== "admin") return;
+    const comment = comments.find((item) => item.id === id);
+    setComments((list) => list.filter((item) => item.id !== id));
+    void createSupabaseBrowserClient()?.from("community_comments").delete().eq("id", String(id));
+    if (comment?.targetType === "post") setPosts((list) => list.map((item) => item.id === comment.targetId ? { ...item, replies: Math.max(0, item.replies - 1) } : item));
+    if (comment?.targetType === "work") setWorks((list) => list.map((item) => item.id === comment.targetId ? { ...item, comments: Math.max(0, item.comments - 1) } : item));
+    if (comment?.targetType === "tool" && comment.rating) {
+      const remaining = comments.filter((item) => item.id !== id && item.targetType === "tool" && item.targetId === comment.targetId && item.rating).map((item) => item.rating as number);
+      const average = remaining.length ? remaining.reduce((sum, value) => sum + value, 0) / remaining.length : 0;
+      setTools((list) => list.map((item) => item.id === comment.targetId ? { ...item, rating: Number(average.toFixed(1)), reviews: remaining.length } : item));
+    }
+    setNotice("评论已由管理员删除。");
+  }
+
+  function deleteEntry(type: "wiki" | "work" | "post" | "tool", id: number) {
+    if (user.role !== "admin") return;
+    const table = type === "wiki" ? "wiki_pages" : type === "work" ? "works" : type === "post" ? "forum_posts" : "tools";
+    void createSupabaseBrowserClient()?.from(table).delete().eq("id", String(id));
+    if (type === "wiki") { setWiki((list) => list.filter((item) => item.id !== id)); setRevisions((list) => list.filter((item) => item.pageId !== id)); void createSupabaseBrowserClient()?.from("wiki_revisions").delete().eq("page_id", String(id)); }
+    if (type === "work") setWorks((list) => list.filter((item) => item.id !== id));
+    if (type === "post") setPosts((list) => list.filter((item) => item.id !== id));
+    if (type === "tool") setTools((list) => list.filter((item) => item.id !== id));
+    const targetType = type === "post" ? "post" : type === "work" ? "work" : type === "tool" ? "tool" : null;
+    if (targetType) comments.filter((item) => item.targetType === targetType && item.targetId === id).forEach((item) => void createSupabaseBrowserClient()?.from("community_comments").delete().eq("id", String(item.id)));
+    if (targetType) setComments((list) => list.filter((item) => !(item.targetType === targetType && item.targetId === id)));
+    if (targetType === "post" || targetType === "work") {
+      likes.filter((item) => item.targetType === targetType && item.targetId === id).forEach((item) => void createSupabaseBrowserClient()?.from("community_likes").delete().eq("id", item.id));
+      setLikes((list) => list.filter((item) => !(item.targetType === targetType && item.targetId === id)));
+    }
+    setNotice("条目及其关联互动已删除。");
   }
 
   function submitSearch(value = query) {
@@ -406,20 +439,20 @@ export default function Home() {
         }} />}
         {section === "search" && <SearchSection query={query} setQuery={setQuery} results={searchResults} hotTerms={hotTerms} submitSearch={submitSearch} openWiki={openWiki} setSection={setSection} />}
         {section === "gallery" && <CloudGallerySection works={works} setSection={setSection} openWork={openWork} />}
-        {section === "work-detail" && selectedWork && <CommunityDetail type="work" item={selectedWork} comments={comments.filter((comment) => comment.targetType === "work" && comment.targetId === selectedWork.id)} liked={likes.some((like) => like.targetType === "work" && like.targetId === selectedWork.id && like.userId === user.username)} onBack={() => setSection("gallery")} onLike={() => toggleLike("work", selectedWork.id)} onComment={(content) => addComment("work", selectedWork.id, content)} />}
+        {section === "work-detail" && selectedWork && <CommunityDetail type="work" item={selectedWork} comments={comments.filter((comment) => comment.targetType === "work" && comment.targetId === selectedWork.id)} liked={likes.some((like) => like.targetType === "work" && like.targetId === selectedWork.id && like.userId === user.username)} onBack={() => setSection("gallery")} onLike={() => toggleLike("work", selectedWork.id)} onComment={(content) => addComment("work", selectedWork.id, content)} canModerate={user.role === "admin"} onDeleteComment={deleteComment} />}
         {section === "publish" && <CloudPublishSection user={user} works={works} setWorks={setWorks} setSection={setSection} setNotice={setNotice} supabaseEnabled={supabaseEnabled} />}
         {section === "forum" && <ForumSection posts={posts} setPosts={setPosts} user={user} setNotice={setNotice} openPost={openPost} />}
-        {section === "post-detail" && selectedPost && <CommunityDetail type="post" item={selectedPost} comments={comments.filter((comment) => comment.targetType === "post" && comment.targetId === selectedPost.id)} liked={likes.some((like) => like.targetType === "post" && like.targetId === selectedPost.id && like.userId === user.username)} onBack={() => setSection("forum")} onLike={() => toggleLike("post", selectedPost.id)} onComment={(content) => addComment("post", selectedPost.id, content)} />}
+        {section === "post-detail" && selectedPost && <CommunityDetail type="post" item={selectedPost} comments={comments.filter((comment) => comment.targetType === "post" && comment.targetId === selectedPost.id)} liked={likes.some((like) => like.targetType === "post" && like.targetId === selectedPost.id && like.userId === user.username)} onBack={() => setSection("forum")} onLike={() => toggleLike("post", selectedPost.id)} onComment={(content) => addComment("post", selectedPost.id, content)} canModerate={user.role === "admin"} onDeleteComment={deleteComment} />}
         {section === "tools" && <ToolsSection tools={tools} user={user} setTools={setTools} setNotice={setNotice} openTool={openTool} />}
-        {section === "tool-detail" && selectedTool && <ToolDetail tool={selectedTool} comments={comments.filter((comment) => comment.targetType === "tool" && comment.targetId === selectedTool.id)} onBack={() => setSection("tools")} onReview={(content, rating) => addComment("tool", selectedTool.id, content, rating)} />}
-        {section === "admin" && <AdminSection user={user} wiki={wiki} setWiki={setWiki} revisions={revisions} setRevisions={setRevisions} pendingCount={pendingCount} setNotice={setNotice} />}
+        {section === "tool-detail" && selectedTool && <ToolDetail tool={selectedTool} comments={comments.filter((comment) => comment.targetType === "tool" && comment.targetId === selectedTool.id)} onBack={() => setSection("tools")} onReview={(content, rating) => addComment("tool", selectedTool.id, content, rating)} canModerate={user.role === "admin"} onDeleteComment={deleteComment} />}
+        {section === "admin" && <AdminSection user={user} wiki={wiki} setWiki={setWiki} revisions={revisions} setRevisions={setRevisions} works={works} posts={posts} tools={tools} comments={comments} pendingCount={pendingCount} setNotice={setNotice} onDeleteEntry={deleteEntry} onDeleteComment={deleteComment} />}
         {section === "profile" && <ProfileSection user={user} wiki={wiki} works={works} posts={posts} />}
       </div>
     </main>
   );
 }
 
-function Header({ section, setSection, user, login, pendingCount, supabaseEnabled, supabaseUser, onAuth }: { section: Section; setSection: (s: Section) => void; user: User; login: (r: Role) => void; pendingCount: number; supabaseEnabled: boolean; supabaseUser: string | null; onAuth: (action: "signin" | "signup" | "signout", email?: string, password?: string, portal?: "user" | "admin") => Promise<void> }) {
+function Header({ section, setSection, user, login, pendingCount, supabaseEnabled, supabaseUser, onAuth }: { section: Section; setSection: (s: Section) => void; user: User; login: (r: Role) => void; pendingCount: number; supabaseEnabled: boolean; supabaseUser: string | null; onAuth: (action: "signin" | "signup" | "signout", email?: string, password?: string, portal?: "user" | "admin", username?: string) => Promise<void> }) {
   const nav: { key: Section; label: string }[] = [
     { key: "home", label: "首页" },
     { key: "wiki", label: "知识库" },
@@ -467,16 +500,17 @@ function AuthControls({ currentEmail, onAuth }: { currentEmail: string | null; o
 }
 
 
-function LoginSection({ supabaseEnabled, onAuth }: { supabaseEnabled: boolean; onAuth: (action: "signin" | "signup" | "signout", email?: string, password?: string, portal?: "user" | "admin") => Promise<void> }) {
+function LoginSection({ supabaseEnabled, onAuth }: { supabaseEnabled: boolean; onAuth: (action: "signin" | "signup" | "signout", email?: string, password?: string, portal?: "user" | "admin", username?: string) => Promise<void> }) {
   const [portal, setPortal] = useState<"user" | "admin">("user");
   const [registering, setRegistering] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   async function submit() {
     setSubmitting(true);
-    await onAuth(registering ? "signup" : "signin", email.trim(), password, portal);
+    await onAuth(registering ? "signup" : "signin", email.trim(), password, portal, username);
     setSubmitting(false);
   }
 
@@ -501,9 +535,10 @@ function LoginSection({ supabaseEnabled, onAuth }: { supabaseEnabled: boolean; o
         {portal === "admin" && <p className="mt-3 text-sm text-slate-500">仅已被授予管理员角色的账号可以进入后台。</p>}
         {!supabaseEnabled && <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">尚未配置 Supabase 环境变量，云端登录暂不可用。</div>}
         <div className="mt-6 space-y-4">
+          {registering && <Field label="用户名" value={username} onChange={setUsername} />}
           <Field label="邮箱地址" value={email} onChange={setEmail} />
           <label className="block"><span className="text-sm font-bold text-slate-500">密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 6 位" className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3" /></label>
-          <button disabled={!supabaseEnabled || submitting || !email.includes("@") || password.length < 6} onClick={submit} className="w-full rounded-2xl bg-blue-600 py-4 font-bold text-white disabled:bg-slate-300">{submitting ? "处理中…" : portal === "admin" ? "验证管理员身份" : registering ? "创建账号" : "登录"}</button>
+          <button disabled={!supabaseEnabled || submitting || !email.includes("@") || password.length < 6 || (registering && username.trim().length < 2)} onClick={submit} className="w-full rounded-2xl bg-blue-600 py-4 font-bold text-white disabled:bg-slate-300">{submitting ? "处理中…" : portal === "admin" ? "验证管理员身份" : registering ? "创建账号" : "登录"}</button>
         </div>
         {portal === "user" && <button onClick={() => setRegistering(!registering)} className="mt-5 text-sm font-bold text-blue-600">{registering ? "已有账号？返回登录" : "没有账号？使用邮箱注册"}</button>}
       </div>
@@ -649,12 +684,12 @@ function ForumSection({ posts, setPosts, user, setNotice, openPost }: { posts: P
   return <section className="grid gap-6 lg:grid-cols-[280px_1fr]"><aside className="rounded-[1.75rem] bg-white p-5 shadow-xl"><h2 className="mb-3 text-xl font-black">讨论版块</h2>{boards.map((b) => <button key={b} onClick={() => setBoard(b)} className={`mb-2 w-full rounded-2xl px-4 py-3 text-left font-bold ${board === b ? "bg-blue-600 text-white" : "bg-slate-50 text-slate-600"}`}>{b}</button>)}</aside><div className="space-y-5"><div className="rounded-[1.75rem] bg-white p-5 shadow-xl"><h1 className="text-2xl font-black">{board}</h1><div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]"><input value={title} onChange={(e) => setTitle(e.target.value)} className="rounded-2xl border px-4 py-3" /><input value={content} onChange={(e) => setContent(e.target.value)} className="rounded-2xl border px-4 py-3" /><button disabled={user.role === "guest" || title.length < 5} onClick={() => { setPosts([{ id: Date.now(), board, title, content, author: user.nickname, replies: 0, likes: 0, createdAt: new Date().toISOString().slice(5, 10) }, ...posts]); setNotice("帖子已发布到对应版块。") }} className="rounded-2xl bg-blue-600 px-5 font-bold text-white disabled:bg-slate-300">发帖</button></div></div>{posts.filter((p) => p.board === board || p.pinned).map((post) => <button onClick={() => openPost(post.id)} key={post.id} className="block w-full rounded-[1.75rem] bg-white p-5 text-left shadow-xl transition hover:-translate-y-1"><div className="flex flex-wrap gap-2">{post.pinned && <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-600">置顶</span>}{post.featured && <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-600">精华</span>}<span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{post.board}</span></div><h2 className="mt-3 text-xl font-black">{post.title}</h2><p className="mt-2 text-slate-600">{post.content}</p><div className="mt-4 text-sm text-slate-400">{post.author} · {post.replies} 回复 · {post.likes} 赞 · {post.createdAt}</div></button>)}</div></section>;
 }
 
-function CommunityDetail({ type, item, comments, liked, onBack, onLike, onComment }: { type: "post" | "work"; item: Post | Work; comments: CommunityComment[]; liked: boolean; onBack: () => void; onLike: () => void; onComment: (content: string) => boolean }) {
+function CommunityDetail({ type, item, comments, liked, onBack, onLike, onComment, canModerate, onDeleteComment }: { type: "post" | "work"; item: Post | Work; comments: CommunityComment[]; liked: boolean; onBack: () => void; onLike: () => void; onComment: (content: string) => boolean; canModerate: boolean; onDeleteComment: (id: number) => void }) {
   const [content, setContent] = useState("");
   const isWork = type === "work";
   const work = isWork ? item as Work & { imageUrl?: string } : null;
   const post = !isWork ? item as Post : null;
-  return <section className="mx-auto max-w-4xl space-y-5"><button onClick={onBack} className="font-bold text-blue-600">← 返回{isWork ? "作品展示" : "讨论区"}</button><article className="overflow-hidden rounded-[2rem] bg-white shadow-xl">{work?.imageUrl ? <img src={work.imageUrl} alt={work.title} className="max-h-[520px] w-full object-cover" /> : work ? <div className={`h-72 bg-gradient-to-br ${work.color}`} /> : null}<div className="p-7"><div className="text-sm font-bold text-blue-600">{work ? `${work.kit} · ${work.author}` : `${post?.board} · ${post?.author}`}</div><h1 className="mt-3 text-4xl font-black">{item.title}</h1><p className="mt-5 whitespace-pre-wrap text-lg leading-8 text-slate-600">{work ? work.desc : post?.content}</p><div className="mt-6 flex items-center gap-3"><button onClick={onLike} className={`rounded-2xl px-5 py-3 font-bold ${liked ? "bg-red-600 text-white" : "bg-slate-100"}`}>{liked ? "♥ 已点赞" : "♡ 点赞"} · {item.likes}</button><span className="text-sm text-slate-400">{comments.length} 条评论</span></div></div></article><CommentComposer content={content} setContent={setContent} onSubmit={() => { if (content.trim() && onComment(content.trim())) setContent(""); }} /><CommentList comments={comments} /></section>;
+  return <section className="mx-auto max-w-4xl space-y-5"><button onClick={onBack} className="font-bold text-blue-600">← 返回{isWork ? "作品展示" : "讨论区"}</button><article className="overflow-hidden rounded-[2rem] bg-white shadow-xl">{work?.imageUrl ? <img src={work.imageUrl} alt={work.title} className="max-h-[520px] w-full object-cover" /> : work ? <div className={`h-72 bg-gradient-to-br ${work.color}`} /> : null}<div className="p-7"><div className="text-sm font-bold text-blue-600">{work ? `${work.kit} · ${work.author}` : `${post?.board} · ${post?.author}`}</div><h1 className="mt-3 text-4xl font-black">{item.title}</h1><p className="mt-5 whitespace-pre-wrap text-lg leading-8 text-slate-600">{work ? work.desc : post?.content}</p><div className="mt-6 flex items-center gap-3"><button onClick={onLike} className={`rounded-2xl px-5 py-3 font-bold ${liked ? "bg-red-600 text-white" : "bg-slate-100"}`}>{liked ? "♥ 已点赞" : "♡ 点赞"} · {item.likes}</button><span className="text-sm text-slate-400">{comments.length} 条评论</span></div></div></article><CommentComposer content={content} setContent={setContent} onSubmit={() => { if (content.trim() && onComment(content.trim())) setContent(""); }} /><CommentList comments={comments} canModerate={canModerate} onDelete={onDeleteComment} /></section>;
 }
 
 function ToolsSection({ tools, user, setTools, setNotice, openTool }: { tools: Tool[]; user: User; setTools: (tools: Tool[]) => void; setNotice: (notice: string) => void; openTool: (id: number) => void }) {
@@ -664,24 +699,37 @@ function ToolsSection({ tools, user, setTools, setNotice, openTool }: { tools: T
   return <section><div className="mb-5 flex items-center justify-between"><h1 className="text-3xl font-black">工具评测库</h1>{user.role === "admin" && <button onClick={() => setShowAdd(!showAdd)} className="rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white">＋ 添加工具</button>}</div>{showAdd && <div className="mb-6 grid gap-3 rounded-[1.75rem] bg-white p-5 shadow-xl md:grid-cols-4"><Field label="工具名称" value={name} onChange={setName} /><Field label="品牌" value={brand} onChange={setBrand} /><Field label="分类" value={category} onChange={setCategory} /><Field label="参考价格" value={price} onChange={setPrice} /><button onClick={addTool} className="rounded-2xl bg-blue-600 py-3 font-bold text-white md:col-span-4">保存工具条目</button></div>}<div className="grid gap-5 lg:grid-cols-3">{tools.map((tool) => <button onClick={() => openTool(tool.id)} key={tool.id} className="rounded-[1.75rem] bg-white p-5 text-left shadow-xl transition hover:-translate-y-1"><div className="text-sm font-bold text-blue-600">{tool.brand} · {tool.category}</div><h2 className="mt-2 text-2xl font-black">{tool.name}</h2><div className="mt-4 flex items-end gap-2"><span className="text-4xl font-black text-amber-500">{tool.rating}</span><span className="pb-1 text-sm text-slate-400">/ 5 · {tool.reviews}条评价</span></div><div className="mt-4 rounded-2xl bg-slate-50 p-4"><div className="font-bold">参考价格：{tool.price}</div><div className="mt-3 flex flex-wrap gap-2">{tool.specs.map((spec) => <span key={spec} className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600">{spec}</span>)}</div></div><div className="mt-4 text-sm text-slate-600">优点：{tool.pros.join("、") || "等待用户评价"}</div></button>)}</div></section>;
 }
 
-function ToolDetail({ tool, comments, onBack, onReview }: { tool: Tool; comments: CommunityComment[]; onBack: () => void; onReview: (content: string, rating: number) => boolean }) {
+function ToolDetail({ tool, comments, onBack, onReview, canModerate, onDeleteComment }: { tool: Tool; comments: CommunityComment[]; onBack: () => void; onReview: (content: string, rating: number) => boolean; canModerate: boolean; onDeleteComment: (id: number) => void }) {
   const [content, setContent] = useState(""); const [rating, setRating] = useState(5);
-  return <section className="mx-auto max-w-4xl space-y-5"><button onClick={onBack} className="font-bold text-blue-600">← 返回工具评测库</button><article className="rounded-[2rem] bg-white p-8 shadow-xl"><div className="text-sm font-bold text-blue-600">{tool.brand} · {tool.category}</div><h1 className="mt-3 text-4xl font-black">{tool.name}</h1><div className="mt-6 flex items-center gap-4"><span className="text-6xl font-black text-amber-500">{tool.rating}</span><div><div className="text-2xl text-amber-500">★★★★★</div><div className="text-sm text-slate-400">来自 {tool.reviews} 条用户评价</div></div></div><div className="mt-6 rounded-3xl bg-slate-50 p-5"><b>参考价格：{tool.price}</b><p className="mt-3 text-slate-600">规格：{tool.specs.join("、") || "暂无"}</p><p className="mt-2 text-slate-600">优点：{tool.pros.join("、") || "等待用户补充"}</p></div></article><div className="rounded-[1.75rem] bg-white p-5 shadow-xl"><h2 className="text-xl font-black">发表评价</h2><div className="my-4 flex gap-2">{[1,2,3,4,5].map((value) => <button key={value} onClick={() => setRating(value)} className={`text-3xl ${value <= rating ? "text-amber-500" : "text-slate-300"}`}>★</button>)}</div><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="分享你的实际使用体验" className="h-28 w-full rounded-2xl border p-4" /><button onClick={() => { if (content.trim() && onReview(content.trim(), rating)) setContent(""); }} className="mt-3 rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white">提交 {rating} 星评价</button></div><CommentList comments={comments} /></section>;
+  return <section className="mx-auto max-w-4xl space-y-5"><button onClick={onBack} className="font-bold text-blue-600">← 返回工具评测库</button><article className="rounded-[2rem] bg-white p-8 shadow-xl"><div className="text-sm font-bold text-blue-600">{tool.brand} · {tool.category}</div><h1 className="mt-3 text-4xl font-black">{tool.name}</h1><div className="mt-6 flex items-center gap-4"><span className="text-6xl font-black text-amber-500">{tool.rating}</span><div><div className="text-2xl text-amber-500">★★★★★</div><div className="text-sm text-slate-400">来自 {tool.reviews} 条用户评价</div></div></div><div className="mt-6 rounded-3xl bg-slate-50 p-5"><b>参考价格：{tool.price}</b><p className="mt-3 text-slate-600">规格：{tool.specs.join("、") || "暂无"}</p><p className="mt-2 text-slate-600">优点：{tool.pros.join("、") || "等待用户补充"}</p></div></article><div className="rounded-[1.75rem] bg-white p-5 shadow-xl"><h2 className="text-xl font-black">发表评价</h2><div className="my-4 flex gap-2">{[1,2,3,4,5].map((value) => <button key={value} onClick={() => setRating(value)} className={`text-3xl ${value <= rating ? "text-amber-500" : "text-slate-300"}`}>★</button>)}</div><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="分享你的实际使用体验" className="h-28 w-full rounded-2xl border p-4" /><button onClick={() => { if (content.trim() && onReview(content.trim(), rating)) setContent(""); }} className="mt-3 rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white">提交 {rating} 星评价</button></div><CommentList comments={comments} canModerate={canModerate} onDelete={onDeleteComment} /></section>;
 }
 
 function CommentComposer({ content, setContent, onSubmit }: { content: string; setContent: (content: string) => void; onSubmit: () => void }) {
   return <div className="rounded-[1.75rem] bg-white p-5 shadow-xl"><h2 className="text-xl font-black">发表评论</h2><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="写下你的看法…" className="mt-4 h-28 w-full rounded-2xl border p-4" /><button disabled={!content.trim()} onClick={onSubmit} className="mt-3 rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white disabled:bg-slate-300">发布评论</button></div>;
 }
 
-function CommentList({ comments }: { comments: CommunityComment[] }) {
-  return <div className="space-y-3">{comments.length ? comments.map((comment) => <div key={comment.id} className="rounded-[1.5rem] bg-white p-5 shadow-xl"><div className="flex items-center justify-between"><b>{comment.author}</b><span className="text-xs text-slate-400">{comment.createdAt}</span></div>{comment.rating && <div className="mt-2 text-amber-500">{"★".repeat(comment.rating)}{"☆".repeat(5-comment.rating)}</div>}<p className="mt-3 text-slate-600">{comment.content}</p></div>) : <div className="rounded-2xl bg-white p-6 text-center text-slate-400">还没有评论，来发表第一条吧。</div>}</div>;
+function CommentList({ comments, canModerate = false, onDelete }: { comments: CommunityComment[]; canModerate?: boolean; onDelete?: (id: number) => void }) {
+  return <div className="space-y-3">{comments.length ? comments.map((comment) => <div key={comment.id} className="rounded-[1.5rem] bg-white p-5 shadow-xl"><div className="flex items-center justify-between gap-3"><b>@{comment.author}</b><div className="flex items-center gap-3"><span className="text-xs text-slate-400">{comment.createdAt}</span>{canModerate && <button onClick={() => onDelete?.(comment.id)} className="rounded-xl bg-red-600 px-3 py-1 text-xs font-bold text-white">删除评论</button>}</div></div>{comment.rating && <div className="mt-2 text-amber-500">{"★".repeat(comment.rating)}{"☆".repeat(5-comment.rating)}</div>}<p className="mt-3 text-slate-600">{comment.content}</p></div>) : <div className="rounded-2xl bg-white p-6 text-center text-slate-400">还没有评论，来发表第一条吧。</div>}</div>;
 }
 
-function AdminSection({ user, wiki, setWiki, revisions, setRevisions, pendingCount, setNotice }: { user: User; wiki: WikiPage[]; setWiki: (w: WikiPage[]) => void; revisions: Revision[]; setRevisions: (r: Revision[]) => void; pendingCount: number; setNotice: (n: string) => void }) {
-  if (user.role !== "admin" && user.role !== "editor") return <div className="rounded-[2rem] bg-white p-10 text-center shadow-xl"><h1 className="text-2xl font-black">需要编辑者或管理员权限</h1><p className="mt-2 text-slate-500">可在顶部切换演示账号体验审核后台。</p></div>;
-  const pendingRevisions = revisions.filter((r) => r.status === "pending");
-  const pendingPages = wiki.filter((p) => p.status === "pending");
-  return <section className="space-y-5"><div className="grid gap-4 md:grid-cols-4">{[["待审核", pendingCount], ["Wiki条目", wiki.length], ["注册用户", 5000], ["月活目标", 10000]].map(([k, v]) => <div key={k} className="rounded-3xl bg-white p-5 shadow-xl shadow-slate-200/60"><div className="text-sm font-bold text-slate-400">{k}</div><div className="mt-2 text-3xl font-black text-blue-600">{v}</div></div>)}</div><Panel title="内容审核队列"><div className="space-y-3">{pendingPages.map((p) => <div key={p.id} className="rounded-2xl bg-amber-50 p-4"><b>{p.title}</b><div className="mt-2 text-sm text-slate-600">普通用户编辑待审核。</div><button onClick={() => { setWiki(wiki.map((item) => item.id === p.id ? { ...item, status: "published" } : item)); setNotice("条目审核已通过。") }} className="mt-3 rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white">通过</button></div>)}{pendingRevisions.map((r) => <div key={r.id} className="rounded-2xl bg-slate-50 p-4"><b>版本 v{r.revision}</b><div className="mt-1 text-sm text-slate-500">{r.editor} · {r.summary}</div><button onClick={() => { setRevisions(revisions.map((item) => item.id === r.id ? { ...item, status: "approved" } : item)); setWiki(wiki.map((p) => p.id === r.pageId ? { ...p, content: r.content, imageUrl: r.imageUrl ?? p.imageUrl, revision: r.revision, status: "published", updatedAt: new Date().toISOString().slice(0, 10) } : p)); setNotice("编辑版本已通过并发布。") }} className="mt-3 rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white">通过并发布</button></div>)}{pendingCount === 0 && <div className="rounded-2xl bg-slate-50 p-6 text-center text-slate-500">当前没有待审核内容。</div>}</div></Panel></section>;
+function AdminSection({ user, wiki, setWiki, revisions, setRevisions, works, posts, tools, comments, pendingCount, setNotice, onDeleteEntry, onDeleteComment }: { user: User; wiki: WikiPage[]; setWiki: (w: WikiPage[]) => void; revisions: Revision[]; setRevisions: (r: Revision[]) => void; works: Work[]; posts: Post[]; tools: Tool[]; comments: CommunityComment[]; pendingCount: number; setNotice: (n: string) => void; onDeleteEntry: (type: "wiki" | "work" | "post" | "tool", id: number) => void; onDeleteComment: (id: number) => void }) {
+  if (user.role !== "admin" && user.role !== "editor") return <div className="rounded-[2rem] bg-white p-10 text-center shadow-xl"><h1 className="text-2xl font-black">需要编辑者或管理员权限</h1><p className="mt-2 text-slate-500">请使用已授权的管理员账号登录。</p></div>;
+  const pendingRevisions = revisions.filter((revision) => revision.status === "pending");
+  const pendingPages = wiki.filter((page) => page.status === "pending");
+  const groups = [
+    { label: "知识库", type: "wiki" as const, items: wiki.map((item) => ({ id: item.id, title: item.title })) },
+    { label: "作品", type: "work" as const, items: works.map((item) => ({ id: item.id, title: item.title })) },
+    { label: "帖子", type: "post" as const, items: posts.map((item) => ({ id: item.id, title: item.title })) },
+    { label: "工具", type: "tool" as const, items: tools.map((item) => ({ id: item.id, title: item.name })) },
+  ];
+  return <section className="space-y-5">
+    <div className="grid gap-4 md:grid-cols-4">{[["待审核", pendingCount], ["Wiki条目", wiki.length], ["社区评论", comments.length], ["管理身份", user.role === "admin" ? "管理员" : "编辑者"]].map(([key, value]) => <div key={key} className="rounded-3xl bg-white p-5 shadow-xl"><div className="text-sm font-bold text-slate-400">{key}</div><div className="mt-2 text-3xl font-black text-blue-600">{value}</div></div>)}</div>
+    <Panel title="内容审核队列"><div className="space-y-3">{pendingPages.map((page) => <div key={page.id} className="rounded-2xl bg-amber-50 p-4"><b>{page.title}</b><div className="mt-2 text-sm text-slate-600">普通用户编辑待审核。</div><button onClick={() => { setWiki(wiki.map((item) => item.id === page.id ? { ...item, status: "published" } : item)); setNotice("条目审核已通过。") }} className="mt-3 rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white">通过</button></div>)}{pendingRevisions.map((revision) => <div key={revision.id} className="rounded-2xl bg-slate-50 p-4"><b>版本 v{revision.revision}</b><div className="mt-1 text-sm text-slate-500">{revision.editor} · {revision.summary}</div><button onClick={() => { setRevisions(revisions.map((item) => item.id === revision.id ? { ...item, status: "approved" } : item)); setWiki(wiki.map((page) => page.id === revision.pageId ? { ...page, content: revision.content, imageUrl: revision.imageUrl ?? page.imageUrl, revision: revision.revision, status: "published", updatedAt: new Date().toISOString().slice(0, 10) } : page)); setNotice("编辑版本已通过并发布。") }} className="mt-3 rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white">通过并发布</button></div>)}{pendingCount === 0 && <div className="rounded-2xl bg-slate-50 p-6 text-center text-slate-500">当前没有待审核内容。</div>}</div></Panel>
+    {user.role === "admin" && <>
+      <Panel title="条目删除管理"><div className="grid gap-4 lg:grid-cols-2">{groups.map((group) => <div key={group.type} className="rounded-2xl bg-slate-50 p-4"><h3 className="mb-3 text-lg font-black">{group.label}</h3><div className="max-h-72 space-y-2 overflow-auto">{group.items.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3"><span className="truncate font-bold">{item.title}</span><button onClick={() => onDeleteEntry(group.type, item.id)} className="shrink-0 rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white">删除</button></div>)}</div></div>)}</div></Panel>
+      <Panel title="评论管理"><div className="max-h-[520px] space-y-3 overflow-auto">{comments.map((comment) => <div key={comment.id} className="rounded-2xl bg-slate-50 p-4"><div className="flex items-center justify-between gap-3"><b>@{comment.author} · {comment.targetType} #{comment.targetId}</b><button onClick={() => onDeleteComment(comment.id)} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white">删除评论</button></div><p className="mt-2 text-sm text-slate-600">{comment.content}</p></div>)}{comments.length === 0 && <div className="p-5 text-center text-slate-400">暂无评论。</div>}</div></Panel>
+    </>}
+  </section>;
 }
 
 function ProfileSection({ user, wiki, works, posts }: { user: User; wiki: WikiPage[]; works: Work[]; posts: Post[] }) {

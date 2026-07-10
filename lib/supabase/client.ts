@@ -104,7 +104,7 @@ export function createSupabaseBrowserClient() {
         }
         return result;
       },
-      async signUp(credentials: { email: string; password: string }) {
+      async signUp(credentials: { email: string; password: string; data?: { username?: string; display_name?: string } }) {
         return requestJson(`${url}/auth/v1/signup`, { method: "POST", body: JSON.stringify(credentials) });
       },
       async signOut() {

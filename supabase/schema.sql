@@ -9,12 +9,18 @@ end $$;
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null,
+  username text,
   display_name text,
   role public.user_role not null default 'user',
   contribution_score integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+
 );
+
+alter table public.profiles add column if not exists username text;
+update public.profiles set username = 'user_' || left(replace(id::text, '-', ''), 8) where username is null or username = '';
+create unique index if not exists profiles_username_unique on public.profiles (lower(username));
 
 create or replace function public.handle_new_user()
 returns trigger
@@ -22,8 +28,8 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  insert into public.profiles (id, email, display_name, role)
-  values (new.id, coalesce(new.email, ''), coalesce(new.raw_user_meta_data ->> 'display_name', split_part(coalesce(new.email, 'user'), '@', 1)), 'user')
+  insert into public.profiles (id, email, username, display_name, role)
+  values (new.id, coalesce(new.email, ''), coalesce(nullif(new.raw_user_meta_data ->> 'username', ''), 'user_' || left(replace(new.id::text, '-', ''), 8)), coalesce(new.raw_user_meta_data ->> 'display_name', split_part(coalesce(new.email, 'user'), '@', 1)), 'user')
   on conflict (id) do nothing;
   return new;
 end;
@@ -34,14 +40,23 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
 
-insert into public.profiles (id, email, display_name)
-select id, coalesce(email, ''), split_part(coalesce(email, 'user'), '@', 1)
+insert into public.profiles (id, email, username, display_name)
+select id, coalesce(email, ''), 'user_' || left(replace(id::text, '-', ''), 8), split_part(coalesce(email, 'user'), '@', 1)
 from auth.users
 on conflict (id) do nothing;
 
 alter table public.profiles enable row level security;
 drop policy if exists "users read own profile" on public.profiles;
 create policy "users read own profile" on public.profiles for select to authenticated using (id = (select auth.uid()));
+
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer set search_path = public
+as $$
+  select exists(select 1 from public.profiles where id = (select auth.uid()) and role = 'admin');
+$$;
 
 create table if not exists public.wiki_pages (
   id bigint primary key,
@@ -147,37 +162,68 @@ alter table public.community_likes enable row level security;
 drop policy if exists "public read wiki" on public.wiki_pages;
 create policy "public read wiki" on public.wiki_pages for select using (true);
 drop policy if exists "authenticated write wiki" on public.wiki_pages;
-create policy "authenticated write wiki" on public.wiki_pages for all to authenticated using (true) with check (true);
+drop policy if exists "admin manage wiki" on public.wiki_pages;
+create policy "admin manage wiki" on public.wiki_pages for all to authenticated using ((select public.is_admin())) with check ((select public.is_admin()));
 
 drop policy if exists "public read revisions" on public.wiki_revisions;
 create policy "public read revisions" on public.wiki_revisions for select using (true);
 drop policy if exists "authenticated write revisions" on public.wiki_revisions;
-create policy "authenticated write revisions" on public.wiki_revisions for all to authenticated using (true) with check (true);
+drop policy if exists "authenticated insert revisions" on public.wiki_revisions;
+create policy "authenticated insert revisions" on public.wiki_revisions for insert to authenticated with check (true);
+drop policy if exists "authenticated update revisions" on public.wiki_revisions;
+create policy "authenticated update revisions" on public.wiki_revisions for update to authenticated using (true) with check (true);
+drop policy if exists "admin delete revisions" on public.wiki_revisions;
+create policy "admin delete revisions" on public.wiki_revisions for delete to authenticated using ((select public.is_admin()));
 
 drop policy if exists "public read works" on public.works;
 create policy "public read works" on public.works for select using (true);
 drop policy if exists "authenticated write works" on public.works;
-create policy "authenticated write works" on public.works for all to authenticated using (true) with check (true);
+drop policy if exists "authenticated insert works" on public.works;
+create policy "authenticated insert works" on public.works for insert to authenticated with check (true);
+drop policy if exists "authenticated update works" on public.works;
+create policy "authenticated update works" on public.works for update to authenticated using (true) with check (true);
+drop policy if exists "admin delete works" on public.works;
+create policy "admin delete works" on public.works for delete to authenticated using ((select public.is_admin()));
 
 drop policy if exists "public read posts" on public.forum_posts;
 create policy "public read posts" on public.forum_posts for select using (true);
 drop policy if exists "authenticated write posts" on public.forum_posts;
-create policy "authenticated write posts" on public.forum_posts for all to authenticated using (true) with check (true);
+drop policy if exists "authenticated insert posts" on public.forum_posts;
+create policy "authenticated insert posts" on public.forum_posts for insert to authenticated with check (true);
+drop policy if exists "authenticated update posts" on public.forum_posts;
+create policy "authenticated update posts" on public.forum_posts for update to authenticated using (true) with check (true);
+drop policy if exists "admin delete posts" on public.forum_posts;
+create policy "admin delete posts" on public.forum_posts for delete to authenticated using ((select public.is_admin()));
 
 drop policy if exists "public read tools" on public.tools;
 create policy "public read tools" on public.tools for select using (true);
 drop policy if exists "authenticated write tools" on public.tools;
-create policy "authenticated write tools" on public.tools for all to authenticated using (true) with check (true);
+drop policy if exists "admin insert tools" on public.tools;
+create policy "admin insert tools" on public.tools for insert to authenticated with check ((select public.is_admin()));
+drop policy if exists "authenticated update tools" on public.tools;
+create policy "authenticated update tools" on public.tools for update to authenticated using (true) with check (true);
+drop policy if exists "admin delete tools" on public.tools;
+create policy "admin delete tools" on public.tools for delete to authenticated using ((select public.is_admin()));
 
 drop policy if exists "public read comments" on public.community_comments;
 create policy "public read comments" on public.community_comments for select using (true);
 drop policy if exists "authenticated write comments" on public.community_comments;
-create policy "authenticated write comments" on public.community_comments for all to authenticated using (true) with check (true);
+drop policy if exists "users insert comments" on public.community_comments;
+create policy "users insert comments" on public.community_comments for insert to authenticated with check (user_id = (select auth.uid())::text);
+drop policy if exists "users update own comments" on public.community_comments;
+create policy "users update own comments" on public.community_comments for update to authenticated using (user_id = (select auth.uid())::text) with check (user_id = (select auth.uid())::text);
+drop policy if exists "admin delete comments" on public.community_comments;
+create policy "admin delete comments" on public.community_comments for delete to authenticated using ((select public.is_admin()));
 
 drop policy if exists "public read likes" on public.community_likes;
 create policy "public read likes" on public.community_likes for select using (true);
 drop policy if exists "authenticated write likes" on public.community_likes;
-create policy "authenticated write likes" on public.community_likes for all to authenticated using (true) with check (true);
+drop policy if exists "users insert likes" on public.community_likes;
+create policy "users insert likes" on public.community_likes for insert to authenticated with check (user_id = (select auth.uid())::text);
+drop policy if exists "users update own likes" on public.community_likes;
+create policy "users update own likes" on public.community_likes for update to authenticated using (user_id = (select auth.uid())::text) with check (user_id = (select auth.uid())::text);
+drop policy if exists "users delete own likes" on public.community_likes;
+create policy "users delete own likes" on public.community_likes for delete to authenticated using (user_id = (select auth.uid())::text or (select public.is_admin()));
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('works', 'works', true, 10485760, array['image/jpeg','image/png','image/webp'])
