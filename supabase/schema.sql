@@ -12,6 +12,7 @@ create table if not exists public.profiles (
   username text,
   display_name text,
   role public.user_role not null default 'user',
+  account_status text not null default 'active' check (account_status in ('active','suspended')),
   contribution_score integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -19,6 +20,12 @@ create table if not exists public.profiles (
 );
 
 alter table public.profiles add column if not exists username text;
+alter table public.profiles add column if not exists account_status text not null default 'active';
+do $$ begin
+  alter table public.profiles add constraint profiles_account_status_check check (account_status in ('active','suspended'));
+exception
+  when duplicate_object then null;
+end $$;
 update public.profiles set username = 'user_' || left(replace(id::text, '-', ''), 8) where username is null or username = '';
 create unique index if not exists profiles_username_unique on public.profiles (lower(username));
 
@@ -27,9 +34,18 @@ returns trigger
 language plpgsql
 security definer set search_path = public
 as $$
+declare
+  desired_username text;
 begin
-  insert into public.profiles (id, email, username, display_name, role)
-  values (new.id, coalesce(new.email, ''), coalesce(nullif(new.raw_user_meta_data ->> 'username', ''), 'user_' || left(replace(new.id::text, '-', ''), 8)), coalesce(new.raw_user_meta_data ->> 'display_name', split_part(coalesce(new.email, 'user'), '@', 1)), 'user')
+  desired_username := coalesce(nullif(trim(new.raw_user_meta_data ->> 'username'), ''), 'user_' || left(replace(new.id::text, '-', ''), 8));
+  if char_length(desired_username) < 2 or char_length(desired_username) > 24 or desired_username ~ '\s' then
+    raise exception 'INVALID_USERNAME';
+  end if;
+  if exists(select 1 from public.profiles where lower(username) = lower(desired_username)) then
+    raise exception 'USERNAME_TAKEN';
+  end if;
+  insert into public.profiles (id, email, username, display_name, role, account_status)
+  values (new.id, coalesce(new.email, ''), desired_username, desired_username, 'user', 'active')
   on conflict (id) do nothing;
   return new;
 end;
@@ -49,6 +65,7 @@ alter table public.profiles enable row level security;
 drop policy if exists "users read own profile" on public.profiles;
 create policy "users read own profile" on public.profiles for select to authenticated using (id = (select auth.uid()));
 
+
 create or replace function public.is_admin()
 returns boolean
 language sql
@@ -57,6 +74,72 @@ security definer set search_path = public
 as $$
   select exists(select 1 from public.profiles where id = (select auth.uid()) and role = 'admin');
 $$;
+
+drop policy if exists "admins read all profiles" on public.profiles;
+create policy "admins read all profiles" on public.profiles for select to authenticated using ((select public.is_admin()));
+
+create or replace function public.is_username_available(candidate text)
+returns boolean
+language sql
+stable
+security definer set search_path = public
+as $$
+  select char_length(trim(candidate)) between 2 and 24
+    and trim(candidate) !~ '\s'
+    and not exists(select 1 from public.profiles where lower(username) = lower(trim(candidate)));
+$$;
+
+grant execute on function public.is_username_available(text) to anon, authenticated;
+
+create or replace function public.change_username(new_username text)
+returns text
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  normalized text := trim(new_username);
+  current_user_id uuid := auth.uid();
+begin
+  if current_user_id is null then raise exception 'AUTH_REQUIRED'; end if;
+  if char_length(normalized) < 2 or char_length(normalized) > 24 or normalized ~ '\s' then raise exception 'INVALID_USERNAME'; end if;
+  if exists(select 1 from public.profiles where lower(username) = lower(normalized) and id <> current_user_id) then raise exception 'USERNAME_TAKEN'; end if;
+  update public.profiles set username = normalized, display_name = normalized, updated_at = now() where id = current_user_id;
+  update public.community_comments set author = normalized where user_id = current_user_id::text;
+  return normalized;
+end;
+$$;
+
+grant execute on function public.change_username(text) to authenticated;
+
+create or replace function public.admin_update_user(target_user_id uuid, new_role public.user_role, new_status text)
+returns boolean
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not public.is_admin() then raise exception 'ADMIN_REQUIRED'; end if;
+  if new_status not in ('active','suspended') then raise exception 'INVALID_STATUS'; end if;
+  update public.profiles set role = new_role, account_status = new_status, updated_at = now() where id = target_user_id;
+  return found;
+end;
+$$;
+
+grant execute on function public.admin_update_user(uuid, public.user_role, text) to authenticated;
+
+create or replace function public.admin_delete_user(target_user_id uuid)
+returns boolean
+language plpgsql
+security definer set search_path = public, auth
+as $$
+begin
+  if not public.is_admin() then raise exception 'ADMIN_REQUIRED'; end if;
+  if target_user_id = auth.uid() then raise exception 'CANNOT_DELETE_SELF'; end if;
+  delete from auth.users where id = target_user_id;
+  return found;
+end;
+$$;
+
+grant execute on function public.admin_delete_user(uuid) to authenticated;
 
 create table if not exists public.wiki_pages (
   id bigint primary key,

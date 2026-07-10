@@ -88,6 +88,12 @@ export function createSupabaseBrowserClient() {
 
   return {
     from: tableClient,
+    async rpc(name: string, args: Record<string, unknown> = {}) {
+      return requestJson(`${url}/rest/v1/rpc/${encodeURIComponent(name)}`, {
+        method: "POST",
+        body: JSON.stringify(args),
+      });
+    },
     auth: {
       async getUser() {
         const token = storedToken();

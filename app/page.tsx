@@ -29,7 +29,8 @@ type Revision = { id: number; pageId: number; revision: number; content: string;
 type Work = { id: number; title: string; kit: string; desc: string; tags: string[]; author: string; likes: number; comments: number; color: string; createdAt: string };
 type Post = { id: number; board: string; title: string; content: string; author: string; replies: number; likes: number; pinned?: boolean; featured?: boolean; createdAt: string };
 type Tool = { id: number; name: string; brand: string; category: string; price: string; rating: number; reviews: number; specs: string[]; pros: string[] };
-type User = { username: string; nickname: string; role: Role; score: number };
+type User = { id: string; username: string; nickname: string; role: Role; score: number; status?: "active" | "suspended" };
+type ManagedUser = { id: string; email: string; username: string; display_name?: string; role: "user" | "admin"; account_status: "active" | "suspended"; contribution_score: number; created_at: string };
 type TargetType = "post" | "work" | "tool";
 type CommunityComment = { id: number; targetType: TargetType; targetId: number; author: string; userId: string; content: string; rating?: number; createdAt: string };
 type CommunityLike = { id: string; targetType: "post" | "work"; targetId: number; userId: string };
@@ -176,6 +177,7 @@ export default function Home() {
   const [tools, setTools] = useState<Tool[]>(seedTools);
   const [comments, setComments] = useState<CommunityComment[]>([]);
   const [likes, setLikes] = useState<CommunityLike[]>([]);
+  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
   const [selectedPostId, setSelectedPostId] = useState(seedPosts[0]?.id ?? 1);
   const [selectedWorkId, setSelectedWorkId] = useState(seedWorks[0]?.id ?? 1);
   const [selectedToolId, setSelectedToolId] = useState(seedTools[0]?.id ?? 1);
@@ -186,18 +188,31 @@ export default function Home() {
   const [remoteLoaded, setRemoteLoaded] = useState(false);
   const [supabaseUser, setSupabaseUser] = useState<string | null>(null);
   const supabaseEnabled = isSupabaseConfigured();
-  const [user, setUser] = useState<User>({ username: "guest", nickname: "游客", role: "guest", score: 0 });
+  const [user, setUser] = useState<User>({ id: "guest", username: "guest", nickname: "游客", role: "guest", score: 0, status: "active" });
   const [notice, setNotice] = useState(supabaseEnabled ? "正在连接 Supabase…" : "尚未配置 Supabase，当前使用浏览器本地数据。");
 
   async function applyAuthenticatedUser(authUser: { id: string; email?: string }) {
     const supabase = createSupabaseBrowserClient();
     const profileResult = await supabase?.from("profiles").select("*").eq("id", authUser.id).single();
-    const profile = profileResult?.data as { username?: string; display_name?: string; role?: "user" | "admin"; contribution_score?: number } | null;
+    const profile = profileResult?.data as { username?: string; display_name?: string; role?: "user" | "admin"; account_status?: "active" | "suspended"; contribution_score?: number } | null;
     const role: Role = profile?.role === "admin" ? "admin" : "user";
+    const status = profile?.account_status ?? "active";
     const email = authUser.email ?? "user@example.com";
+    if (status === "suspended") {
+      await supabase?.auth.signOut();
+      setSupabaseUser(null);
+      setUser({ id: "guest", username: "guest", nickname: "游客", role: "guest", score: 0, status: "active" });
+      setNotice("该账号已被管理员停用，请联系管理员。");
+      return { role, status };
+    }
     setSupabaseUser(email);
-    setUser({ username: authUser.id, nickname: profile?.username || profile?.display_name || email.split("@")[0], role, score: profile?.contribution_score ?? 0 });
-    return role;
+    const username = profile?.username || profile?.display_name || email.split("@")[0];
+    setUser({ id: authUser.id, username, nickname: username, role, score: profile?.contribution_score ?? 0, status });
+    if (role === "admin") {
+      const usersResult = await supabase?.from("profiles").select("*").order("created_at", { ascending: false });
+      if (usersResult?.data) setManagedUsers(usersResult.data as ManagedUser[]);
+    }
+    return { role, status };
   }
 
   useEffect(() => {
@@ -207,7 +222,8 @@ export default function Home() {
     setPosts(readStore("gundam_wiki_posts", seedPosts));
     setComments(readStore("gundam_community_comments", []));
     setLikes(readStore("gundam_community_likes", []));
-    setUser(readStore("gundam_wiki_user", { username: "guest", nickname: "游客", role: "guest", score: 0 }));
+    const storedUser = readStore<User>("gundam_wiki_user", { id: "guest", username: "guest", nickname: "游客", role: "guest", score: 0, status: "active" });
+    setUser({ ...storedUser, id: storedUser.id ?? storedUser.username });
     const supabase = createSupabaseBrowserClient();
     if (!supabase) return;
 
@@ -241,7 +257,7 @@ export default function Home() {
       if (email) void applyAuthenticatedUser(session!.user);
       else {
         setSupabaseUser(null);
-        setUser({ username: "guest", nickname: "游客", role: "guest", score: 0 });
+        setUser({ id: "guest", username: "guest", nickname: "游客", role: "guest", score: 0, status: "active" });
       }
     });
 
@@ -311,7 +327,11 @@ export default function Home() {
       return;
     }
     if (action === "signup") {
-      const result = await supabase.auth.signUp({ email, password, data: { username: username.trim(), display_name: username.trim() } });
+      const normalized = username.trim();
+      if (!/^[\p{L}\p{N}_]{2,24}$/u.test(normalized)) { setNotice("用户名需为 2–24 位，只能包含文字、数字和下划线。"); return; }
+      const availability = await supabase.rpc("is_username_available", { candidate: normalized });
+      if (availability.error || availability.data !== true) { setNotice("该用户名已被使用，请更换一个用户名。"); return; }
+      const result = await supabase.auth.signUp({ email, password, data: { username: normalized, display_name: normalized } });
       setNotice(result.error ? result.error.message : "注册成功，请前往邮箱完成验证后登录。");
       return;
     }
@@ -320,18 +340,24 @@ export default function Home() {
       setNotice(result.error?.message ?? "登录失败，请检查邮箱和密码。");
       return;
     }
-    const role = await applyAuthenticatedUser(result.data.user);
-    if (portal === "admin" && role !== "admin") {
+    const account = await applyAuthenticatedUser(result.data.user);
+    if (account.status === "suspended") {
+      await supabase.auth.signOut();
+      setNotice("该账号已被管理员停用，请联系管理员。");
+      return;
+    }
+    if (portal === "admin" && account.role !== "admin") {
       await supabase.auth.signOut();
       setNotice("该账号没有管理员权限，请使用普通用户入口登录。");
       return;
     }
-    setNotice(role === "admin" ? "管理员登录成功。" : "用户登录成功。");
-    setSection(role === "admin" && portal === "admin" ? "admin" : "home");
+    setNotice(account.role === "admin" ? "管理员登录成功。" : "用户登录成功。");
+    setSection(account.role === "admin" && portal === "admin" ? "admin" : "home");
   }
 
   function login(role: Role) {
-    const next: User = role === "guest" ? { username: "guest", nickname: "游客", role, score: 0 } : { username: role === "admin" ? "admin" : role === "editor" ? "demo_editor" : "xiaoxing", nickname: roleText[role], role, score: role === "admin" ? 999 : role === "editor" ? 100 : 10 };
+    const demoName = role === "admin" ? "admin" : role === "editor" ? "demo_editor" : "xiaoxing";
+    const next: User = role === "guest" ? { id: "guest", username: "guest", nickname: "游客", role, score: 0, status: "active" } : { id: demoName, username: demoName, nickname: demoName, role, score: role === "admin" ? 999 : role === "editor" ? 100 : 10, status: "active" };
     setUser(next);
     setNotice(`已切换为${roleText[role]}，可体验对应权限。`);
   }
@@ -349,7 +375,7 @@ export default function Home() {
 
   function addComment(targetType: TargetType, targetId: number, content: string, rating?: number) {
     if (user.role === "guest") { setNotice("请先登录后再发表评论。"); return false; }
-    const nextComment: CommunityComment = { id: Date.now(), targetType, targetId, author: user.nickname, userId: user.username, content, rating, createdAt: new Date().toLocaleString("zh-CN", { hour12: false }) };
+    const nextComment: CommunityComment = { id: Date.now(), targetType, targetId, author: user.nickname, userId: user.id, content, rating, createdAt: new Date().toLocaleString("zh-CN", { hour12: false }) };
     const nextComments = [...comments, nextComment];
     setComments(nextComments);
     void createSupabaseBrowserClient()?.from("community_comments").upsert([{ id: nextComment.id, target_type: nextComment.targetType, target_id: nextComment.targetId, author: nextComment.author, user_id: nextComment.userId, content: nextComment.content, rating: nextComment.rating ?? null, created_at: nextComment.createdAt }]);
@@ -366,11 +392,11 @@ export default function Home() {
 
   function toggleLike(targetType: "post" | "work", targetId: number) {
     if (user.role === "guest") { setNotice("请先登录后再点赞。"); return; }
-    const id = `${targetType}-${targetId}-${user.username}`;
+    const id = `${targetType}-${targetId}-${user.id}`;
     const liked = likes.some((item) => item.id === id);
     if (liked) void createSupabaseBrowserClient()?.from("community_likes").delete().eq("id", id);
-    else void createSupabaseBrowserClient()?.from("community_likes").upsert([{ id, target_type: targetType, target_id: targetId, user_id: user.username }]);
-    setLikes((list) => liked ? list.filter((item) => item.id !== id) : [...list, { id, targetType, targetId, userId: user.username }]);
+    else void createSupabaseBrowserClient()?.from("community_likes").upsert([{ id, target_type: targetType, target_id: targetId, user_id: user.id }]);
+    setLikes((list) => liked ? list.filter((item) => item.id !== id) : [...list, { id, targetType, targetId, userId: user.id }]);
     if (targetType === "post") setPosts((list) => list.map((item) => item.id === targetId ? { ...item, likes: Math.max(0, item.likes + (liked ? -1 : 1)) } : item));
     else setWorks((list) => list.map((item) => item.id === targetId ? { ...item, likes: Math.max(0, item.likes + (liked ? -1 : 1)) } : item));
     setNotice(liked ? "已取消点赞。" : "点赞成功。");
@@ -409,6 +435,37 @@ export default function Home() {
     setNotice("条目及其关联互动已删除。");
   }
 
+  async function changeUsername(nextUsername: string) {
+    const normalized = nextUsername.trim();
+    if (!/^[\p{L}\p{N}_]{2,24}$/u.test(normalized)) { setNotice("用户名需为 2–24 位，只能包含文字、数字和下划线。"); return false; }
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase || user.role === "guest") { setNotice("请先登录后再修改用户名。"); return false; }
+    const result = await supabase.rpc("change_username", { new_username: normalized });
+    if (result.error) { setNotice(result.error.message.includes("USERNAME_TAKEN") ? "该用户名已被占用。" : result.error.message); return false; }
+    const oldUsername = user.username;
+    setUser((current) => ({ ...current, username: normalized, nickname: normalized }));
+    setComments((list) => list.map((item) => item.userId === user.id ? { ...item, author: normalized } : item));
+    setWorks((list) => list.map((item) => item.author === oldUsername ? { ...item, author: normalized } : item));
+    setPosts((list) => list.map((item) => item.author === oldUsername ? { ...item, author: normalized } : item));
+    setNotice("用户名修改成功。");
+    return true;
+  }
+
+  async function updateManagedUser(id: string, role: "user" | "admin", status: "active" | "suspended") {
+    const result = await createSupabaseBrowserClient()?.rpc("admin_update_user", { target_user_id: id, new_role: role, new_status: status });
+    if (result?.error) { setNotice(result.error.message); return; }
+    setManagedUsers((list) => list.map((item) => item.id === id ? { ...item, role, account_status: status } : item));
+    setNotice("用户账号设置已更新。");
+  }
+
+  async function deleteManagedUser(id: string) {
+    if (id === user.id) { setNotice("不能删除当前正在登录的管理员账号。"); return; }
+    const result = await createSupabaseBrowserClient()?.rpc("admin_delete_user", { target_user_id: id });
+    if (result?.error) { setNotice(result.error.message); return; }
+    setManagedUsers((list) => list.filter((item) => item.id !== id));
+    setNotice("用户账号已删除。");
+  }
+
   function submitSearch(value = query) {
     const next = value.trim();
     if (!next) return;
@@ -439,14 +496,14 @@ export default function Home() {
         }} />}
         {section === "search" && <SearchSection query={query} setQuery={setQuery} results={searchResults} hotTerms={hotTerms} submitSearch={submitSearch} openWiki={openWiki} setSection={setSection} />}
         {section === "gallery" && <CloudGallerySection works={works} setSection={setSection} openWork={openWork} />}
-        {section === "work-detail" && selectedWork && <CommunityDetail type="work" item={selectedWork} comments={comments.filter((comment) => comment.targetType === "work" && comment.targetId === selectedWork.id)} liked={likes.some((like) => like.targetType === "work" && like.targetId === selectedWork.id && like.userId === user.username)} onBack={() => setSection("gallery")} onLike={() => toggleLike("work", selectedWork.id)} onComment={(content) => addComment("work", selectedWork.id, content)} canModerate={user.role === "admin"} onDeleteComment={deleteComment} />}
+        {section === "work-detail" && selectedWork && <CommunityDetail type="work" item={selectedWork} comments={comments.filter((comment) => comment.targetType === "work" && comment.targetId === selectedWork.id)} liked={likes.some((like) => like.targetType === "work" && like.targetId === selectedWork.id && like.userId === user.id)} onBack={() => setSection("gallery")} onLike={() => toggleLike("work", selectedWork.id)} onComment={(content) => addComment("work", selectedWork.id, content)} canModerate={user.role === "admin"} onDeleteComment={deleteComment} />}
         {section === "publish" && <CloudPublishSection user={user} works={works} setWorks={setWorks} setSection={setSection} setNotice={setNotice} supabaseEnabled={supabaseEnabled} />}
         {section === "forum" && <ForumSection posts={posts} setPosts={setPosts} user={user} setNotice={setNotice} openPost={openPost} />}
-        {section === "post-detail" && selectedPost && <CommunityDetail type="post" item={selectedPost} comments={comments.filter((comment) => comment.targetType === "post" && comment.targetId === selectedPost.id)} liked={likes.some((like) => like.targetType === "post" && like.targetId === selectedPost.id && like.userId === user.username)} onBack={() => setSection("forum")} onLike={() => toggleLike("post", selectedPost.id)} onComment={(content) => addComment("post", selectedPost.id, content)} canModerate={user.role === "admin"} onDeleteComment={deleteComment} />}
+        {section === "post-detail" && selectedPost && <CommunityDetail type="post" item={selectedPost} comments={comments.filter((comment) => comment.targetType === "post" && comment.targetId === selectedPost.id)} liked={likes.some((like) => like.targetType === "post" && like.targetId === selectedPost.id && like.userId === user.id)} onBack={() => setSection("forum")} onLike={() => toggleLike("post", selectedPost.id)} onComment={(content) => addComment("post", selectedPost.id, content)} canModerate={user.role === "admin"} onDeleteComment={deleteComment} />}
         {section === "tools" && <ToolsSection tools={tools} user={user} setTools={setTools} setNotice={setNotice} openTool={openTool} />}
         {section === "tool-detail" && selectedTool && <ToolDetail tool={selectedTool} comments={comments.filter((comment) => comment.targetType === "tool" && comment.targetId === selectedTool.id)} onBack={() => setSection("tools")} onReview={(content, rating) => addComment("tool", selectedTool.id, content, rating)} canModerate={user.role === "admin"} onDeleteComment={deleteComment} />}
-        {section === "admin" && <AdminSection user={user} wiki={wiki} setWiki={setWiki} revisions={revisions} setRevisions={setRevisions} works={works} posts={posts} tools={tools} comments={comments} pendingCount={pendingCount} setNotice={setNotice} onDeleteEntry={deleteEntry} onDeleteComment={deleteComment} />}
-        {section === "profile" && <ProfileSection user={user} wiki={wiki} works={works} posts={posts} />}
+        {section === "admin" && <AdminSection user={user} wiki={wiki} setWiki={setWiki} revisions={revisions} setRevisions={setRevisions} works={works} posts={posts} tools={tools} comments={comments} managedUsers={managedUsers} pendingCount={pendingCount} setNotice={setNotice} onDeleteEntry={deleteEntry} onDeleteComment={deleteComment} onUpdateUser={updateManagedUser} onDeleteUser={deleteManagedUser} />}
+        {section === "profile" && <ProfileSection user={user} wiki={wiki} works={works} posts={posts} onChangeUsername={changeUsername} />}
       </div>
     </main>
   );
@@ -507,6 +564,19 @@ function LoginSection({ supabaseEnabled, onAuth }: { supabaseEnabled: boolean; o
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [checkingUsername, setCheckingUsername] = useState(false);
+
+  useEffect(() => {
+    if (!registering || !/^[\p{L}\p{N}_]{2,24}$/u.test(username.trim())) { setUsernameAvailable(null); return; }
+    setCheckingUsername(true);
+    const timer = window.setTimeout(async () => {
+      const result = await createSupabaseBrowserClient()?.rpc("is_username_available", { candidate: username.trim() });
+      setUsernameAvailable(result?.data === true);
+      setCheckingUsername(false);
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [username, registering]);
 
   async function submit() {
     setSubmitting(true);
@@ -535,10 +605,10 @@ function LoginSection({ supabaseEnabled, onAuth }: { supabaseEnabled: boolean; o
         {portal === "admin" && <p className="mt-3 text-sm text-slate-500">仅已被授予管理员角色的账号可以进入后台。</p>}
         {!supabaseEnabled && <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">尚未配置 Supabase 环境变量，云端登录暂不可用。</div>}
         <div className="mt-6 space-y-4">
-          {registering && <Field label="用户名" value={username} onChange={setUsername} />}
+          {registering && <div><Field label="用户名" value={username} onChange={setUsername} /><div className={`mt-2 text-xs font-bold ${usernameAvailable ? "text-green-600" : "text-red-500"}`}>{checkingUsername ? "正在检查用户名…" : usernameAvailable === true ? "用户名可以使用" : usernameAvailable === false ? "用户名已被占用" : "2–24 位文字、数字或下划线"}</div></div>}
           <Field label="邮箱地址" value={email} onChange={setEmail} />
           <label className="block"><span className="text-sm font-bold text-slate-500">密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 6 位" className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3" /></label>
-          <button disabled={!supabaseEnabled || submitting || !email.includes("@") || password.length < 6 || (registering && username.trim().length < 2)} onClick={submit} className="w-full rounded-2xl bg-blue-600 py-4 font-bold text-white disabled:bg-slate-300">{submitting ? "处理中…" : portal === "admin" ? "验证管理员身份" : registering ? "创建账号" : "登录"}</button>
+          <button disabled={!supabaseEnabled || submitting || !email.includes("@") || password.length < 6 || (registering && usernameAvailable !== true)} onClick={submit} className="w-full rounded-2xl bg-blue-600 py-4 font-bold text-white disabled:bg-slate-300">{submitting ? "处理中…" : portal === "admin" ? "验证管理员身份" : registering ? "创建账号" : "登录"}</button>
         </div>
         {portal === "user" && <button onClick={() => setRegistering(!registering)} className="mt-5 text-sm font-bold text-blue-600">{registering ? "已有账号？返回登录" : "没有账号？使用邮箱注册"}</button>}
       </div>
@@ -605,7 +675,7 @@ function WikiSection({ page, pages, revisions, user, editing, setEditing, compar
     if (imageFile && supabaseEnabled) {
       const supabase = createSupabaseBrowserClient();
       const extension = imageFile.name.split(".").pop() ?? "jpg";
-      const path = `${user.username}/${crypto.randomUUID()}.${extension}`;
+      const path = `${user.id}/${crypto.randomUUID()}.${extension}`;
       const result = await supabase?.storage.from("wiki-images").upload(path, imageFile, { upsert: false });
       if (result?.error) { setNotice(result.error.message); setUploading(false); return; }
       imageUrl = supabase?.storage.from("wiki-images").getPublicUrl(path).data.publicUrl;
@@ -712,7 +782,7 @@ function CommentList({ comments, canModerate = false, onDelete }: { comments: Co
   return <div className="space-y-3">{comments.length ? comments.map((comment) => <div key={comment.id} className="rounded-[1.5rem] bg-white p-5 shadow-xl"><div className="flex items-center justify-between gap-3"><b>@{comment.author}</b><div className="flex items-center gap-3"><span className="text-xs text-slate-400">{comment.createdAt}</span>{canModerate && <button onClick={() => onDelete?.(comment.id)} className="rounded-xl bg-red-600 px-3 py-1 text-xs font-bold text-white">删除评论</button>}</div></div>{comment.rating && <div className="mt-2 text-amber-500">{"★".repeat(comment.rating)}{"☆".repeat(5-comment.rating)}</div>}<p className="mt-3 text-slate-600">{comment.content}</p></div>) : <div className="rounded-2xl bg-white p-6 text-center text-slate-400">还没有评论，来发表第一条吧。</div>}</div>;
 }
 
-function AdminSection({ user, wiki, setWiki, revisions, setRevisions, works, posts, tools, comments, pendingCount, setNotice, onDeleteEntry, onDeleteComment }: { user: User; wiki: WikiPage[]; setWiki: (w: WikiPage[]) => void; revisions: Revision[]; setRevisions: (r: Revision[]) => void; works: Work[]; posts: Post[]; tools: Tool[]; comments: CommunityComment[]; pendingCount: number; setNotice: (n: string) => void; onDeleteEntry: (type: "wiki" | "work" | "post" | "tool", id: number) => void; onDeleteComment: (id: number) => void }) {
+function AdminSection({ user, wiki, setWiki, revisions, setRevisions, works, posts, tools, comments, managedUsers, pendingCount, setNotice, onDeleteEntry, onDeleteComment, onUpdateUser, onDeleteUser }: { user: User; wiki: WikiPage[]; setWiki: (w: WikiPage[]) => void; revisions: Revision[]; setRevisions: (r: Revision[]) => void; works: Work[]; posts: Post[]; tools: Tool[]; comments: CommunityComment[]; managedUsers: ManagedUser[]; pendingCount: number; setNotice: (n: string) => void; onDeleteEntry: (type: "wiki" | "work" | "post" | "tool", id: number) => void; onDeleteComment: (id: number) => void; onUpdateUser: (id: string, role: "user" | "admin", status: "active" | "suspended") => Promise<void>; onDeleteUser: (id: string) => Promise<void> }) {
   if (user.role !== "admin" && user.role !== "editor") return <div className="rounded-[2rem] bg-white p-10 text-center shadow-xl"><h1 className="text-2xl font-black">需要编辑者或管理员权限</h1><p className="mt-2 text-slate-500">请使用已授权的管理员账号登录。</p></div>;
   const pendingRevisions = revisions.filter((revision) => revision.status === "pending");
   const pendingPages = wiki.filter((page) => page.status === "pending");
@@ -726,14 +796,19 @@ function AdminSection({ user, wiki, setWiki, revisions, setRevisions, works, pos
     <div className="grid gap-4 md:grid-cols-4">{[["待审核", pendingCount], ["Wiki条目", wiki.length], ["社区评论", comments.length], ["管理身份", user.role === "admin" ? "管理员" : "编辑者"]].map(([key, value]) => <div key={key} className="rounded-3xl bg-white p-5 shadow-xl"><div className="text-sm font-bold text-slate-400">{key}</div><div className="mt-2 text-3xl font-black text-blue-600">{value}</div></div>)}</div>
     <Panel title="内容审核队列"><div className="space-y-3">{pendingPages.map((page) => <div key={page.id} className="rounded-2xl bg-amber-50 p-4"><b>{page.title}</b><div className="mt-2 text-sm text-slate-600">普通用户编辑待审核。</div><button onClick={() => { setWiki(wiki.map((item) => item.id === page.id ? { ...item, status: "published" } : item)); setNotice("条目审核已通过。") }} className="mt-3 rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white">通过</button></div>)}{pendingRevisions.map((revision) => <div key={revision.id} className="rounded-2xl bg-slate-50 p-4"><b>版本 v{revision.revision}</b><div className="mt-1 text-sm text-slate-500">{revision.editor} · {revision.summary}</div><button onClick={() => { setRevisions(revisions.map((item) => item.id === revision.id ? { ...item, status: "approved" } : item)); setWiki(wiki.map((page) => page.id === revision.pageId ? { ...page, content: revision.content, imageUrl: revision.imageUrl ?? page.imageUrl, revision: revision.revision, status: "published", updatedAt: new Date().toISOString().slice(0, 10) } : page)); setNotice("编辑版本已通过并发布。") }} className="mt-3 rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white">通过并发布</button></div>)}{pendingCount === 0 && <div className="rounded-2xl bg-slate-50 p-6 text-center text-slate-500">当前没有待审核内容。</div>}</div></Panel>
     {user.role === "admin" && <>
+      <Panel title="用户管理"><div className="space-y-3">{managedUsers.map((managedUser) => <div key={managedUser.id} className="grid gap-3 rounded-2xl bg-slate-50 p-4 lg:grid-cols-[1fr_180px_180px_auto]"><div><div className="font-black">@{managedUser.username}</div><div className="mt-1 text-sm text-slate-500">{managedUser.email} · 积分 {managedUser.contribution_score}</div></div><select disabled={managedUser.id === user.id} value={managedUser.role} onChange={(event) => onUpdateUser(managedUser.id, event.target.value as "user" | "admin", managedUser.account_status)} className="rounded-xl border px-3 py-2"><option value="user">普通用户</option><option value="admin">管理员</option></select><select disabled={managedUser.id === user.id} value={managedUser.account_status} onChange={(event) => onUpdateUser(managedUser.id, managedUser.role, event.target.value as "active" | "suspended")} className="rounded-xl border px-3 py-2"><option value="active">正常</option><option value="suspended">已停用</option></select><button disabled={managedUser.id === user.id} onClick={() => onDeleteUser(managedUser.id)} className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white disabled:bg-slate-300">删除账号</button></div>)}{managedUsers.length === 0 && <div className="rounded-2xl bg-slate-50 p-6 text-center text-slate-400">暂无可管理用户，请重新登录管理员账号刷新列表。</div>}</div></Panel>
       <Panel title="条目删除管理"><div className="grid gap-4 lg:grid-cols-2">{groups.map((group) => <div key={group.type} className="rounded-2xl bg-slate-50 p-4"><h3 className="mb-3 text-lg font-black">{group.label}</h3><div className="max-h-72 space-y-2 overflow-auto">{group.items.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3"><span className="truncate font-bold">{item.title}</span><button onClick={() => onDeleteEntry(group.type, item.id)} className="shrink-0 rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white">删除</button></div>)}</div></div>)}</div></Panel>
       <Panel title="评论管理"><div className="max-h-[520px] space-y-3 overflow-auto">{comments.map((comment) => <div key={comment.id} className="rounded-2xl bg-slate-50 p-4"><div className="flex items-center justify-between gap-3"><b>@{comment.author} · {comment.targetType} #{comment.targetId}</b><button onClick={() => onDeleteComment(comment.id)} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white">删除评论</button></div><p className="mt-2 text-sm text-slate-600">{comment.content}</p></div>)}{comments.length === 0 && <div className="p-5 text-center text-slate-400">暂无评论。</div>}</div></Panel>
     </>}
   </section>;
 }
 
-function ProfileSection({ user, wiki, works, posts }: { user: User; wiki: WikiPage[]; works: Work[]; posts: Post[] }) {
-  return <section className="rounded-[2rem] bg-white p-8 shadow-xl shadow-slate-200/60"><div className="flex flex-col gap-5 md:flex-row md:items-center"><div className="grid h-24 w-24 place-items-center rounded-3xl bg-blue-600 text-4xl font-black text-white">{user.nickname[0]}</div><div><h1 className="text-3xl font-black">{user.nickname}</h1><p className="mt-2 text-slate-500">{roleText[user.role]} · 贡献积分 {user.score}</p><div className="mt-3 flex flex-wrap gap-2">{["初入模界", "创始贡献者", "社交新星"].map((a) => <span key={a} className="rounded-full bg-amber-50 px-3 py-1 text-sm font-bold text-amber-700">{a}</span>)}</div></div></div><div className="mt-8 grid gap-4 md:grid-cols-3">{[["参与条目", wiki.length], ["发布作品", works.filter((w) => w.author === user.nickname).length], ["发起讨论", posts.filter((p) => p.author === user.nickname).length]].map(([k, v]) => <div key={k} className="rounded-3xl bg-slate-50 p-5"><div className="text-sm font-bold text-slate-400">{k}</div><div className="mt-2 text-3xl font-black text-blue-600">{v}</div></div>)}</div></section>;
+function ProfileSection({ user, wiki, works, posts, onChangeUsername }: { user: User; wiki: WikiPage[]; works: Work[]; posts: Post[]; onChangeUsername: (username: string) => Promise<boolean> }) {
+  const [username, setUsername] = useState(user.username);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setUsername(user.username); }, [user.username]);
+  async function save() { setSaving(true); await onChangeUsername(username); setSaving(false); }
+  return <section className="space-y-6"><div className="rounded-[2rem] bg-white p-8 shadow-xl"><div className="flex flex-col gap-5 md:flex-row md:items-center"><div className="grid h-24 w-24 place-items-center rounded-3xl bg-blue-600 text-4xl font-black text-white">{user.nickname[0]}</div><div><h1 className="text-3xl font-black">@{user.username}</h1><p className="mt-2 text-slate-500">{roleText[user.role]} · 贡献积分 {user.score}</p><div className="mt-3 flex flex-wrap gap-2">{["初入模界", "创始贡献者", "社交新星"].map((badge) => <span key={badge} className="rounded-full bg-amber-50 px-3 py-1 text-sm font-bold text-amber-700">{badge}</span>)}</div></div></div><div className="mt-8 grid gap-4 md:grid-cols-3">{[["参与条目", wiki.length], ["发布作品", works.filter((work) => work.author === user.username).length], ["发起讨论", posts.filter((post) => post.author === user.username).length]].map(([key, value]) => <div key={key} className="rounded-3xl bg-slate-50 p-5"><div className="text-sm font-bold text-slate-400">{key}</div><div className="mt-2 text-3xl font-black text-blue-600">{value}</div></div>)}</div></div>{user.role !== "guest" && <div className="rounded-[2rem] bg-white p-7 shadow-xl"><div className="text-xs font-bold tracking-[.25em] text-blue-600">ACCOUNT IDENTITY</div><h2 className="mt-2 text-2xl font-black">修改用户名</h2><p className="mt-2 text-sm text-slate-500">用户名全站唯一，支持 2–24 位文字、数字和下划线。</p><div className="mt-5 flex flex-col gap-3 sm:flex-row"><input value={username} onChange={(event) => setUsername(event.target.value)} className="flex-1 rounded-2xl border px-4 py-3" /><button disabled={saving || username.trim() === user.username} onClick={save} className="rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white disabled:bg-slate-300">{saving ? "检查并保存…" : "保存新用户名"}</button></div></div>}</section>;
 }
 
 function CloudGallerySection({ works, setSection, openWork }: { works: Work[]; setSection: (section: Section) => void; openWork: (id: number) => void }) {
@@ -765,7 +840,7 @@ function CloudPublishSection({ user, works, setWorks, setSection, setNotice, sup
     if (file && supabaseEnabled) {
       const supabase = createSupabaseBrowserClient();
       const extension = file.name.split(".").pop() ?? "jpg";
-      const filePath = `${user.username}/${crypto.randomUUID()}.${extension}`;
+      const filePath = `${user.id}/${crypto.randomUUID()}.${extension}`;
       const uploadResult = await supabase?.storage.from("works").upload(filePath, file, { upsert: false });
       if (uploadResult?.error) { setUploading(false); setNotice(uploadResult.error.message); return; }
       imageUrl = supabase?.storage.from("works").getPublicUrl(filePath).data.publicUrl;
