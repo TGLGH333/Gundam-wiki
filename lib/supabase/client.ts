@@ -62,11 +62,22 @@ function tableClient(table: string) {
       return builder;
     },
     async upsert(rows: unknown[]) {
+      if (!rows.length) return { data: null, error: null };
       return requestJson(`${url}/rest/v1/${encodeURIComponent(table)}`, {
         method: "POST",
         headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
         body: JSON.stringify(rows),
       });
+    },
+    delete() {
+      return {
+        async eq(column: string, value: string) {
+          return requestJson(`${url}/rest/v1/${encodeURIComponent(table)}?${encodeURIComponent(column)}=eq.${encodeURIComponent(value)}`, {
+            method: "DELETE",
+            headers: { Prefer: "return=minimal" },
+          });
+        },
+      };
     },
   };
 }

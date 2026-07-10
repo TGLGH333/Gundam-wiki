@@ -114,11 +114,35 @@ create table if not exists public.tools (
   pros jsonb not null default '[]'::jsonb
 );
 
+alter table public.wiki_pages add column if not exists image_url text;
+alter table public.wiki_revisions add column if not exists image_url text;
+
+create table if not exists public.community_comments (
+  id bigint primary key,
+  target_type text not null check (target_type in ('post','work','tool')),
+  target_id bigint not null,
+  author text not null,
+  user_id text not null,
+  content text not null,
+  rating integer check (rating between 1 and 5),
+  created_at text not null
+);
+
+create table if not exists public.community_likes (
+  id text primary key,
+  target_type text not null check (target_type in ('post','work')),
+  target_id bigint not null,
+  user_id text not null,
+  unique(target_type, target_id, user_id)
+);
+
 alter table public.wiki_pages enable row level security;
 alter table public.wiki_revisions enable row level security;
 alter table public.works enable row level security;
 alter table public.forum_posts enable row level security;
 alter table public.tools enable row level security;
+alter table public.community_comments enable row level security;
+alter table public.community_likes enable row level security;
 
 drop policy if exists "public read wiki" on public.wiki_pages;
 create policy "public read wiki" on public.wiki_pages for select using (true);
@@ -145,6 +169,16 @@ create policy "public read tools" on public.tools for select using (true);
 drop policy if exists "authenticated write tools" on public.tools;
 create policy "authenticated write tools" on public.tools for all to authenticated using (true) with check (true);
 
+drop policy if exists "public read comments" on public.community_comments;
+create policy "public read comments" on public.community_comments for select using (true);
+drop policy if exists "authenticated write comments" on public.community_comments;
+create policy "authenticated write comments" on public.community_comments for all to authenticated using (true) with check (true);
+
+drop policy if exists "public read likes" on public.community_likes;
+create policy "public read likes" on public.community_likes for select using (true);
+drop policy if exists "authenticated write likes" on public.community_likes;
+create policy "authenticated write likes" on public.community_likes for all to authenticated using (true) with check (true);
+
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('works', 'works', true, 10485760, array['image/jpeg','image/png','image/webp'])
 on conflict (id) do update set public = excluded.public, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
@@ -157,6 +191,19 @@ drop policy if exists "owners update work images" on storage.objects;
 create policy "owners update work images" on storage.objects for update to authenticated using (bucket_id = 'works' and owner_id = (select auth.uid())::text) with check (bucket_id = 'works');
 drop policy if exists "owners delete work images" on storage.objects;
 create policy "owners delete work images" on storage.objects for delete to authenticated using (bucket_id = 'works' and owner_id = (select auth.uid())::text);
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('wiki-images', 'wiki-images', true, 10485760, array['image/jpeg','image/png','image/webp'])
+on conflict (id) do update set public = excluded.public, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "public view wiki images" on storage.objects;
+create policy "public view wiki images" on storage.objects for select using (bucket_id = 'wiki-images');
+drop policy if exists "authenticated upload wiki images" on storage.objects;
+create policy "authenticated upload wiki images" on storage.objects for insert to authenticated with check (bucket_id = 'wiki-images');
+drop policy if exists "owners update wiki images" on storage.objects;
+create policy "owners update wiki images" on storage.objects for update to authenticated using (bucket_id = 'wiki-images' and owner_id = (select auth.uid())::text) with check (bucket_id = 'wiki-images');
+drop policy if exists "owners delete wiki images" on storage.objects;
+create policy "owners delete wiki images" on storage.objects for delete to authenticated using (bucket_id = 'wiki-images' and owner_id = (select auth.uid())::text);
 
 insert into public.wiki_pages (id,title,slug,category,summary,content,tags,kit,grade,scale,release,price,views,likes,status,revision,updated_at) values
 (1,'RG 元祖高达 Ver.2.0','rg-rx78-2-ver2','模型图鉴','RG系列15周年纪念作品，采用全新进阶MS关节。','## 套件概览\nRG 元祖高达 Ver.2.0 是面向进阶玩家与素组玩家都很友好的套件。','["素组友好","RG","元祖","2024新品"]','RX-78-2 Gundam','RG','1/144','2024','3,500日元',24820,913,'published',3,'2026-07-09'),
