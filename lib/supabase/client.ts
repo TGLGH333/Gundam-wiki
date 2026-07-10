@@ -1,9 +1,11 @@
 type AuthUser = { id: string; email?: string };
-type AuthSession = { access_token: string; user: AuthUser };
+type AuthSession = { access_token: string; refresh_token?: string; user: AuthUser };
 type AuthCallback = (event: string, session: AuthSession | null) => void;
 
 const TOKEN_KEY = "gundam_supabase_token";
+const REFRESH_TOKEN_KEY = "gundam_supabase_refresh_token";
 const listeners = new Set<AuthCallback>();
+let refreshPromise: Promise<boolean> | null = null;
 
 export function isSupabaseConfigured() {
   return Boolean(
@@ -23,7 +25,39 @@ function storedToken() {
   return typeof window === "undefined" ? null : localStorage.getItem(TOKEN_KEY);
 }
 
-async function requestJson(url: string, init: RequestInit = {}) {
+function storedRefreshToken() {
+  return typeof window === "undefined" ? null : localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+function clearStoredSession() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+async function performRefresh() {
+  const refreshToken = storedRefreshToken();
+  if (!refreshToken) return false;
+  const { url, key } = configuration();
+  const response = await fetch(`${url}/auth/v1/token?grant_type=refresh_token`, {
+    method: "POST",
+    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+  const session = await response.json().catch(() => null) as AuthSession | null;
+  if (!response.ok || !session?.access_token) { clearStoredSession(); return false; }
+  localStorage.setItem(TOKEN_KEY, session.access_token);
+  if (session.refresh_token) localStorage.setItem(REFRESH_TOKEN_KEY, session.refresh_token);
+  listeners.forEach((listener) => listener("TOKEN_REFRESHED", session));
+  return true;
+}
+
+async function refreshSession() {
+  if (!refreshPromise) refreshPromise = performRefresh().finally(() => { refreshPromise = null; });
+  return refreshPromise;
+}
+
+async function requestJson(url: string, init: RequestInit = {}, retry = true) {
   const { key } = configuration();
   const token = storedToken();
   const response = await fetch(url, {
@@ -36,6 +70,7 @@ async function requestJson(url: string, init: RequestInit = {}) {
     },
   });
   const data = await response.json().catch(() => null);
+  if (response.status === 401 && retry && !url.includes("grant_type=refresh_token") && await refreshSession()) return requestJson(url, init, false);
   if (!response.ok) return { data: null, error: { message: data?.msg ?? data?.message ?? data?.error_description ?? "Supabase request failed" } };
   return { data, error: null };
 }
@@ -105,6 +140,7 @@ export function createSupabaseBrowserClient() {
         const result = await requestJson(`${url}/auth/v1/token?grant_type=password`, { method: "POST", body: JSON.stringify(credentials) });
         if (result.data?.access_token && typeof window !== "undefined") {
           localStorage.setItem(TOKEN_KEY, result.data.access_token);
+          if (result.data.refresh_token) localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refresh_token);
           const session = result.data as AuthSession;
           listeners.forEach((listener) => listener("SIGNED_IN", session));
         }
@@ -115,7 +151,7 @@ export function createSupabaseBrowserClient() {
       },
       async signOut() {
         await requestJson(`${url}/auth/v1/logout`, { method: "POST" });
-        if (typeof window !== "undefined") localStorage.removeItem(TOKEN_KEY);
+        clearStoredSession();
         listeners.forEach((listener) => listener("SIGNED_OUT", null));
         return { error: null };
       },

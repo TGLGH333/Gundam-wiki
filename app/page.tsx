@@ -245,6 +245,10 @@ export default function Home() {
       if (commentResult.data?.length) setComments(commentResult.data.map((item: { id: number; target_type: TargetType; target_id: number; author: string; user_id: string; content: string; rating?: number; created_at: string }) => ({ id: item.id, targetType: item.target_type, targetId: item.target_id, author: item.author, userId: item.user_id, content: item.content, rating: item.rating, createdAt: item.created_at })));
       if (likeResult.data?.length) setLikes(likeResult.data.map((item: { id: string; target_type: "post" | "work"; target_id: number; user_id: string }) => ({ id: item.id, targetType: item.target_type, targetId: item.target_id, userId: item.user_id })));
       if (authResult.data.user?.email) void applyAuthenticatedUser(authResult.data.user);
+      else {
+        setSupabaseUser(null);
+        setUser({ id: "guest", username: "guest", nickname: "游客", role: "guest", score: 0, status: "active" });
+      }
       setRemoteLoaded(true);
       setNotice("Supabase 已连接，云端内容与账号服务可用。");
     }).catch(() => {
