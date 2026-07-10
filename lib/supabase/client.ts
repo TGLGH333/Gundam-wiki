@@ -104,7 +104,7 @@ export function createSupabaseBrowserClient() {
       },
       onAuthStateChange(callback: AuthCallback) {
         listeners.add(callback);
-        return { data: { subscription: { unsubscribe: () => listeners.delete(callback) } } };
+        return { data: { subscription: { unsubscribe: () => { listeners.delete(callback); } } } };
       },
     },
     storage: {

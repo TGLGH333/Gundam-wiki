@@ -226,7 +226,9 @@ export default function Home() {
       }
     });
 
-    return () => authListener.subscription.unsubscribe();
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => writeStore("gundam_wiki_pages", wiki), [wiki]);
