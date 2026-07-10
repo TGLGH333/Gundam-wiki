@@ -14,6 +14,10 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+"vars": {
+    "NEXT_PUBLIC_SUPABASE_URL": https://vjpgugicrwwydvkifiam.supabase.co,
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": sb_publishable_Lwgm4DrMboFdAkLxd-vuNA_pIwmhLYA
+  },
   "observability": {
     "enabled": true
   }
