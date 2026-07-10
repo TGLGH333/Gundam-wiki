@@ -140,15 +140,20 @@ function writeStore<T>(key: string, value: T) {
   if (typeof window !== "undefined") localStorage.setItem(key, JSON.stringify(value));
 }
 
+function escapeHtml(value: string) {
+  const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
+  return value.replace(/[&<>"']/g, (character) => entities[character] ?? character);
+}
+
 function markdownToHtml(text: string) {
   return text
     .split("\n")
     .map((line) => {
-      if (line.startsWith("## ")) return `<h3>${line.replace("## ", "")}</h3>`;
-      if (line.startsWith("- ")) return `<li>${line.replace("- ", "")}</li>`;
-      if (/^\d+\. /.test(line)) return `<li>${line.replace(/^\d+\. /, "")}</li>`;
+      if (line.startsWith("## ")) return `<h3>${escapeHtml(line.slice(3))}</h3>`;
+      if (line.startsWith("- ")) return `<li>${escapeHtml(line.slice(2))}</li>`;
+      if (/^\d+\. /.test(line)) return `<li>${escapeHtml(line.replace(/^\d+\. /, ""))}</li>`;
       if (!line.trim()) return "";
-      return `<p>${line}</p>`;
+      return `<p>${escapeHtml(line)}</p>`;
     })
     .join("");
 }
@@ -159,16 +164,13 @@ export default function Home() {
   const [revisions, setRevisions] = useState<Revision[]>(seedRevisions);
   const [works, setWorks] = useState<Work[]>(seedWorks);
   const [posts, setPosts] = useState<Post[]>(seedPosts);
-  const [tools, setTools] = useState<Tool[]>(seedTools);
+  const [tools] = useState<Tool[]>(seedTools);
   const [selectedWikiId, setSelectedWikiId] = useState(1);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("全部");
   const [editing, setEditing] = useState(false);
   const [compare, setCompare] = useState(false);
-  const [dbConnected, setDbConnected] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
   const [user, setUser] = useState<User>({ username: "guest", nickname: "游客", role: "guest", score: 0 });
-  const [notice, setNotice] = useState("正在连接内容数据库…");
+  const [notice, setNotice] = useState("页面功能已就绪，内容会保存在当前浏览器中。");
 
   useEffect(() => {
     setWiki(readStore("gundam_wiki_pages", seedWiki));
@@ -176,25 +178,6 @@ export default function Home() {
     setWorks(readStore("gundam_wiki_works", seedWorks));
     setPosts(readStore("gundam_wiki_posts", seedPosts));
     setUser(readStore("gundam_wiki_user", { username: "guest", nickname: "游客", role: "guest", score: 0 }));
-    fetch("/api/data")
-      .then(async (response) => {
-        if (!response.ok) throw new Error("database unavailable");
-        return response.json();
-      })
-      .then((data) => {
-        if (data.wiki?.length) setWiki(data.wiki);
-        if (data.revisions) setRevisions(data.revisions);
-        if (data.works) setWorks(data.works);
-        if (data.posts) setPosts(data.posts);
-        if (data.tools?.length) setTools(data.tools);
-        setDbConnected(true);
-        setNotice("MySQL 已连接，条目编辑、作品发布和论坛内容会自动持久化。");
-      })
-      .catch(() => {
-        setDbConnected(false);
-        setNotice("当前预览环境未启动 MySQL，已自动使用本地数据；部署后会连接数据库服务。");
-      })
-      .finally(() => setHydrated(true));
   }, []);
 
   useEffect(() => writeStore("gundam_wiki_pages", wiki), [wiki]);
@@ -202,14 +185,6 @@ export default function Home() {
   useEffect(() => writeStore("gundam_wiki_works", works), [works]);
   useEffect(() => writeStore("gundam_wiki_posts", posts), [posts]);
   useEffect(() => writeStore("gundam_wiki_user", user), [user]);
-
-  useEffect(() => {
-    if (!hydrated || !dbConnected) return;
-    const timer = window.setTimeout(() => {
-      fetch("/api/data", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "sync", wiki, revisions, works, posts }) }).catch(() => setNotice("数据库同步暂时失败，页面数据已保留在本地。"));
-    }, 600);
-    return () => window.clearTimeout(timer);
-  }, [wiki, revisions, works, posts, hydrated, dbConnected]);
 
   const selectedWiki = wiki.find((item) => item.id === selectedWikiId) ?? wiki[0];
   const hotTerms = ["RG元祖2.0", "渗线", "神之手剪钳", "MGEX强袭自由", "无缝处理"];
@@ -265,7 +240,7 @@ export default function Home() {
         <div className="my-4 rounded-2xl border border-blue-100 bg-white/80 px-4 py-3 text-sm text-slate-600 shadow-sm backdrop-blur">{notice}</div>
 
         {section === "home" && <HomeSection wiki={wiki} works={works} posts={posts} hotTerms={hotTerms} query={query} setQuery={setQuery} submitSearch={submitSearch} openWiki={openWiki} setSection={setSection} />}
-        {section === "wiki" && <WikiSection page={selectedWiki} pages={wiki} revisions={revisions.filter((item) => item.pageId === selectedWiki.id)} user={user} editing={editing} setEditing={setEditing} compare={compare} setCompare={setCompare} onSave={(nextContent, summary) => {
+        {section === "wiki" && <WikiSection page={selectedWiki} pages={wiki} revisions={revisions.filter((item) => item.pageId === selectedWiki.id)} user={user} editing={editing} setEditing={setEditing} compare={compare} setCompare={setCompare} onSelect={openWiki} onSave={(nextContent, summary) => {
           const nextRev = selectedWiki.revision + 1;
           const needReview = user.role === "user";
           setWiki((list) => list.map((item) => item.id === selectedWiki.id ? { ...item, content: needReview ? item.content : nextContent, revision: needReview ? item.revision : nextRev, status: needReview ? "pending" : item.status, updatedAt: new Date().toISOString().slice(0, 10) } : item));
@@ -368,7 +343,7 @@ function Panel({ title, action, onAction, children }: { title: string; action?: 
   return <div className="rounded-[1.75rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/50"><div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-black">{title}</h2>{action && <button onClick={onAction} className="text-sm font-bold text-blue-600 hover:text-blue-800">{action}</button>}</div>{children}</div>;
 }
 
-function WikiSection({ page, pages, revisions, user, editing, setEditing, compare, setCompare, onSave }: { page: WikiPage; pages: WikiPage[]; revisions: Revision[]; user: User; editing: boolean; setEditing: (v: boolean) => void; compare: boolean; setCompare: (v: boolean) => void; onSave: (content: string, summary: string) => void }) {
+function WikiSection({ page, pages, revisions, user, editing, setEditing, compare, setCompare, onSelect, onSave }: { page: WikiPage; pages: WikiPage[]; revisions: Revision[]; user: User; editing: boolean; setEditing: (v: boolean) => void; compare: boolean; setCompare: (v: boolean) => void; onSelect: (id: number) => void; onSave: (content: string, summary: string) => void }) {
   const [content, setContent] = useState(page.content);
   const [summary, setSummary] = useState("补充条目内容");
   const canEdit = user.role !== "guest" && page.status !== "locked";
@@ -378,7 +353,7 @@ function WikiSection({ page, pages, revisions, user, editing, setEditing, compar
       <aside className="space-y-4">
         <div className="rounded-[1.75rem] bg-white p-5 shadow-xl shadow-slate-200/60">
           <div className="mb-3 text-sm font-bold text-slate-400">知识库目录</div>
-          {pages.map((item) => <div key={item.id} className={`mb-2 rounded-2xl p-3 ${item.id === page.id ? "bg-blue-600 text-white" : "bg-slate-50"}`}><div className="font-bold">{item.title}</div><div className="text-xs opacity-70">{item.category} · v{item.revision}</div></div>)}
+          {pages.map((item) => <button key={item.id} onClick={() => onSelect(item.id)} className={`mb-2 w-full rounded-2xl p-3 text-left transition ${item.id === page.id ? "bg-blue-600 text-white" : "bg-slate-50 hover:bg-blue-50"}`}><span className="block font-bold">{item.title}</span><span className="text-xs opacity-70">{item.category} · v{item.revision}</span></button>)}
         </div>
         <div className="rounded-[1.75rem] bg-white p-5 shadow-xl shadow-slate-200/60">
           <div className="mb-3 text-sm font-bold text-slate-400">套件信息</div>
