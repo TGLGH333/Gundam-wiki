@@ -44,11 +44,22 @@ function tableClient(table: string) {
   const { url } = configuration();
   return {
     select(_columns = "*") {
-      return {
+      const filters: string[] = [];
+      const execute = (order?: string) => requestJson(`${url}/rest/v1/${encodeURIComponent(table)}?select=*${filters.length ? `&${filters.join("&")}` : ""}${order ? `&order=${order}` : ""}`);
+      const builder = {
+        eq(column: string, value: string) {
+          filters.push(`${encodeURIComponent(column)}=eq.${encodeURIComponent(value)}`);
+          return builder;
+        },
         async order(column: string, options?: { ascending?: boolean }) {
-          return requestJson(`${url}/rest/v1/${encodeURIComponent(table)}?select=*&order=${encodeURIComponent(column)}.${options?.ascending === false ? "desc" : "asc"}`);
+          return execute(`${encodeURIComponent(column)}.${options?.ascending === false ? "desc" : "asc"}`);
+        },
+        async single() {
+          const result = await execute();
+          return result.error ? result : { data: Array.isArray(result.data) ? (result.data[0] ?? null) : result.data, error: null };
         },
       };
+      return builder;
     },
     async upsert(rows: unknown[]) {
       return requestJson(`${url}/rest/v1/${encodeURIComponent(table)}`, {

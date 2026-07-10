@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 type Role = "guest" | "user" | "editor" | "admin";
-type Section = "home" | "wiki" | "search" | "gallery" | "publish" | "forum" | "tools" | "admin" | "profile";
+type Section = "home" | "wiki" | "search" | "gallery" | "publish" | "forum" | "tools" | "admin" | "profile" | "login";
 type WikiPage = {
   id: number;
   title: string;
@@ -176,6 +176,17 @@ export default function Home() {
   const [user, setUser] = useState<User>({ username: "guest", nickname: "游客", role: "guest", score: 0 });
   const [notice, setNotice] = useState(supabaseEnabled ? "正在连接 Supabase…" : "尚未配置 Supabase，当前使用浏览器本地数据。");
 
+  async function applyAuthenticatedUser(authUser: { id: string; email?: string }) {
+    const supabase = createSupabaseBrowserClient();
+    const profileResult = await supabase?.from("profiles").select("*").eq("id", authUser.id).single();
+    const profile = profileResult?.data as { display_name?: string; role?: "user" | "admin"; contribution_score?: number } | null;
+    const role: Role = profile?.role === "admin" ? "admin" : "user";
+    const email = authUser.email ?? "user@example.com";
+    setSupabaseUser(email);
+    setUser({ username: authUser.id, nickname: profile?.display_name || email.split("@")[0], role, score: profile?.contribution_score ?? 0 });
+    return role;
+  }
+
   useEffect(() => {
     setWiki(readStore("gundam_wiki_pages", seedWiki));
     setRevisions(readStore("gundam_wiki_revisions", seedRevisions));
@@ -198,10 +209,7 @@ export default function Home() {
       if (workResult.data?.length) setWorks(workResult.data.map((item) => ({ id: item.id, title: item.title, kit: item.kit, desc: item.description, tags: item.tags, author: item.author, likes: item.likes, comments: item.comments, color: item.color, imageUrl: item.image_url, createdAt: item.created_at })) as Work[]);
       if (postResult.data?.length) setPosts(postResult.data.map((item) => ({ id: item.id, board: item.board, title: item.title, content: item.content, author: item.author, replies: item.replies, likes: item.likes, pinned: item.pinned, featured: item.featured, createdAt: item.created_at })) as Post[]);
       if (toolResult.data?.length) setTools(toolResult.data as Tool[]);
-      if (authResult.data.user?.email) {
-        setSupabaseUser(authResult.data.user.email);
-        setUser({ username: authResult.data.user.id, nickname: authResult.data.user.email.split("@")[0], role: "user", score: 10 });
-      }
+      if (authResult.data.user?.email) void applyAuthenticatedUser(authResult.data.user);
       setRemoteLoaded(true);
       setNotice("Supabase 已连接，云端内容与账号服务可用。");
     }).catch(() => {
@@ -211,9 +219,11 @@ export default function Home() {
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       const email = session?.user.email ?? null;
-      setSupabaseUser(email);
-      if (email) setUser({ username: session!.user.id, nickname: email.split("@")[0], role: "user", score: 10 });
-      else setUser({ username: "guest", nickname: "游客", role: "guest", score: 0 });
+      if (email) void applyAuthenticatedUser(session!.user);
+      else {
+        setSupabaseUser(null);
+        setUser({ username: "guest", nickname: "游客", role: "guest", score: 0 });
+      }
     });
 
     return () => authListener.subscription.unsubscribe();
@@ -262,7 +272,7 @@ export default function Home() {
     return [...wikiResults, ...workResults, ...postResults, ...toolResults];
   }, [query, wiki, works, posts, tools]);
 
-  async function handleSupabaseAuth(action: "signin" | "signup" | "signout", email = "", password = "") {
+  async function handleSupabaseAuth(action: "signin" | "signup" | "signout", email = "", password = "", portal: "user" | "admin" = "user") {
     const supabase = createSupabaseBrowserClient();
     if (!supabase) {
       setNotice("请先配置 Supabase 环境变量。");
@@ -270,14 +280,28 @@ export default function Home() {
     }
     if (action === "signout") {
       await supabase.auth.signOut();
-      setNotice("已退出云端账号。");
+      setNotice("已安全退出账号。");
+      setSection("home");
       return;
     }
-    const result = action === "signin"
-      ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password });
-    if (result.error) setNotice(result.error.message);
-    else setNotice(action === "signin" ? "登录成功，云端内容同步已开启。" : "注册成功，请按邮件提示完成验证。");
+    if (action === "signup") {
+      const result = await supabase.auth.signUp({ email, password });
+      setNotice(result.error ? result.error.message : "注册成功，请前往邮箱完成验证后登录。");
+      return;
+    }
+    const result = await supabase.auth.signInWithPassword({ email, password });
+    if (result.error || !result.data?.user) {
+      setNotice(result.error?.message ?? "登录失败，请检查邮箱和密码。");
+      return;
+    }
+    const role = await applyAuthenticatedUser(result.data.user);
+    if (portal === "admin" && role !== "admin") {
+      await supabase.auth.signOut();
+      setNotice("该账号没有管理员权限，请使用普通用户入口登录。");
+      return;
+    }
+    setNotice(role === "admin" ? "管理员登录成功。" : "用户登录成功。");
+    setSection(role === "admin" && portal === "admin" ? "admin" : "home");
   }
 
   function login(role: Role) {
@@ -311,6 +335,7 @@ export default function Home() {
         <Header section={section} setSection={setSection} user={user} login={login} pendingCount={pendingCount} supabaseEnabled={supabaseEnabled} supabaseUser={supabaseUser} onAuth={handleSupabaseAuth} />
         <div className="my-4 rounded-2xl border border-blue-100 bg-white/80 px-4 py-3 text-sm text-slate-600 shadow-sm backdrop-blur">{notice}</div>
 
+        {section === "login" && <LoginSection supabaseEnabled={supabaseEnabled} onAuth={handleSupabaseAuth} />}
         {section === "home" && <HomeSection wiki={wiki} works={works} posts={posts} hotTerms={hotTerms} query={query} setQuery={setQuery} submitSearch={submitSearch} openWiki={openWiki} setSection={setSection} />}
         {section === "wiki" && <WikiSection page={selectedWiki} pages={wiki} revisions={revisions.filter((item) => item.pageId === selectedWiki.id)} user={user} editing={editing} setEditing={setEditing} compare={compare} setCompare={setCompare} onSelect={openWiki} onSave={(nextContent, summary) => {
           const nextRev = selectedWiki.revision + 1;
@@ -332,7 +357,7 @@ export default function Home() {
   );
 }
 
-function Header({ section, setSection, user, login, pendingCount, supabaseEnabled, supabaseUser, onAuth }: { section: Section; setSection: (s: Section) => void; user: User; login: (r: Role) => void; pendingCount: number; supabaseEnabled: boolean; supabaseUser: string | null; onAuth: (action: "signin" | "signup" | "signout", email?: string, password?: string) => Promise<void> }) {
+function Header({ section, setSection, user, login, pendingCount, supabaseEnabled, supabaseUser, onAuth }: { section: Section; setSection: (s: Section) => void; user: User; login: (r: Role) => void; pendingCount: number; supabaseEnabled: boolean; supabaseUser: string | null; onAuth: (action: "signin" | "signup" | "signout", email?: string, password?: string, portal?: "user" | "admin") => Promise<void> }) {
   const nav: { key: Section; label: string }[] = [
     { key: "home", label: "首页" },
     { key: "wiki", label: "知识库" },
@@ -360,7 +385,7 @@ function Header({ section, setSection, user, login, pendingCount, supabaseEnable
         </nav>
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={() => setSection("profile")} className="rounded-2xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">{user.nickname} · {roleText[user.role]}</button>
-          {supabaseEnabled ? <AuthControls currentEmail={supabaseUser} onAuth={onAuth} /> : ["guest", "user", "editor", "admin"].map((role) => <button key={role} onClick={() => login(role as Role)} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 hover:border-blue-300 hover:text-blue-700">{roleText[role as Role]}</button>)}
+          {supabaseEnabled ? (supabaseUser ? <button onClick={() => onAuth("signout")} className="rounded-full border border-green-200 bg-green-50 px-4 py-2 text-xs font-bold text-green-700">退出登录</button> : <button onClick={() => setSection("login")} className="rounded-full bg-blue-600 px-5 py-2 text-xs font-bold text-white">登录 / 注册</button>) : ["guest", "user", "editor", "admin"].map((role) => <button key={role} onClick={() => login(role as Role)} className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 hover:border-blue-300 hover:text-blue-700">{roleText[role as Role]}</button>)}
         </div>
       </div>
     </header>
@@ -377,6 +402,51 @@ function AuthControls({ currentEmail, onAuth }: { currentEmail: string | null; o
     <button disabled={!email || password.length < 6} onClick={() => onAuth("signin", email, password)} className="rounded-full bg-blue-600 px-3 py-2 text-xs font-bold text-white disabled:bg-slate-300">登录</button>
     <button disabled={!email || password.length < 6} onClick={() => onAuth("signup", email, password)} className="rounded-full border border-blue-200 px-3 py-2 text-xs font-bold text-blue-700 disabled:text-slate-300">注册</button>
   </div>;
+}
+
+
+function LoginSection({ supabaseEnabled, onAuth }: { supabaseEnabled: boolean; onAuth: (action: "signin" | "signup" | "signout", email?: string, password?: string, portal?: "user" | "admin") => Promise<void> }) {
+  const [portal, setPortal] = useState<"user" | "admin">("user");
+  const [registering, setRegistering] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit() {
+    setSubmitting(true);
+    await onAuth(registering ? "signup" : "signin", email.trim(), password, portal);
+    setSubmitting(false);
+  }
+
+  return <section className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[.85fr_1.15fr]">
+    <div className="rounded-[2rem] border border-white/20 bg-white p-8 shadow-xl">
+      <div className="font-mono text-xs tracking-[.3em] text-blue-600">IDENTITY ACCESS / 01</div>
+      <h1 className="mt-6 text-5xl font-black leading-none">进入<br />高达模型档案库</h1>
+      <p className="mt-6 text-slate-500">普通用户可以参与条目编辑、发布作品与社区讨论；管理员账号拥有审核与后台管理权限。</p>
+      <div className="mt-10 grid grid-cols-2 gap-3 text-sm">
+        <div className="rounded-2xl bg-slate-50 p-4"><b>普通用户</b><p className="mt-2 text-xs text-slate-500">邮箱注册 · 内容贡献 · 作品发布</p></div>
+        <div className="rounded-2xl bg-slate-50 p-4"><b>管理员</b><p className="mt-2 text-xs text-slate-500">内容审核 · 条目管理 · 社区治理</p></div>
+      </div>
+    </div>
+    <div className="rounded-[2rem] border border-white/20 bg-white p-8 shadow-xl">
+      <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-50 p-2">
+        <button onClick={() => { setPortal("user"); setRegistering(false); }} className={`rounded-xl px-4 py-3 font-bold ${portal === "user" ? "bg-blue-600 text-white" : "text-slate-500"}`}>普通用户入口</button>
+        <button onClick={() => { setPortal("admin"); setRegistering(false); }} className={`rounded-xl px-4 py-3 font-bold ${portal === "admin" ? "bg-blue-600 text-white" : "text-slate-500"}`}>管理员入口</button>
+      </div>
+      <div className="mt-8">
+        <div className="text-sm font-bold text-blue-600">{portal === "admin" ? "ADMIN AUTHORIZATION" : registering ? "CREATE ACCOUNT" : "MEMBER LOGIN"}</div>
+        <h2 className="mt-2 text-3xl font-black">{portal === "admin" ? "管理员登录" : registering ? "注册普通用户" : "普通用户登录"}</h2>
+        {portal === "admin" && <p className="mt-3 text-sm text-slate-500">仅已被授予管理员角色的账号可以进入后台。</p>}
+        {!supabaseEnabled && <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">尚未配置 Supabase 环境变量，云端登录暂不可用。</div>}
+        <div className="mt-6 space-y-4">
+          <Field label="邮箱地址" value={email} onChange={setEmail} />
+          <label className="block"><span className="text-sm font-bold text-slate-500">密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 6 位" className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3" /></label>
+          <button disabled={!supabaseEnabled || submitting || !email.includes("@") || password.length < 6} onClick={submit} className="w-full rounded-2xl bg-blue-600 py-4 font-bold text-white disabled:bg-slate-300">{submitting ? "处理中…" : portal === "admin" ? "验证管理员身份" : registering ? "创建账号" : "登录"}</button>
+        </div>
+        {portal === "user" && <button onClick={() => setRegistering(!registering)} className="mt-5 text-sm font-bold text-blue-600">{registering ? "已有账号？返回登录" : "没有账号？使用邮箱注册"}</button>}
+      </div>
+    </div>
+  </section>;
 }
 
 function HomeSection({ wiki, works, posts, hotTerms, query, setQuery, submitSearch, openWiki, setSection }: { wiki: WikiPage[]; works: Work[]; posts: Post[]; hotTerms: string[]; query: string; setQuery: (q: string) => void; submitSearch: (value?: string) => void; openWiki: (id: number) => void; setSection: (s: Section) => void }) {
