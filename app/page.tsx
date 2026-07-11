@@ -406,8 +406,8 @@ export default function Home() {
         } }] : []),
       ];
       const results = await Promise.all(tasks.map(async (task) => ({ name: task.name, result: await task.run() })));
-      const failed = results.filter(({ result }) => result.error).map(({ name }) => name);
-      if (failed.length) setNotice(`${failed.join("、")}云端同步失败，本地副本仍然安全保存。`);
+      const failed = results.filter(({ result }) => result.error).map(({ name, result }) => `${name}：${result.error?.message ?? "未知错误"}`);
+      if (failed.length) setNotice(`${failed.join(" | ")} 云端同步失败，本地副本仍然安全保存。`);
       else setNotice("云端内容已同步。");
     }, 800);
     return () => window.clearTimeout(timer);
