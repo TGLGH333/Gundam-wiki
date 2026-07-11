@@ -562,11 +562,6 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-900">
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -left-24 top-0 h-72 w-72 rounded-full bg-blue-200/50 blur-3xl" />
-        <div className="absolute right-0 top-40 h-80 w-80 rounded-full bg-cyan-200/60 blur-3xl" />
-      </div>
-
       <div className="relative mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
         <Header section={section} setSection={setSection} user={user} login={login} pendingCount={pendingCount} supabaseEnabled={supabaseEnabled} supabaseUser={supabaseUser} onAuth={handleSupabaseAuth} query={query} setQuery={setQuery} submitSearch={submitSearch} onOpenFilters={() => { setFiltersOpen(true); setSection("search"); }} />
         <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-blue-100 bg-white/90 px-3 py-2 text-xs text-slate-600 shadow-lg backdrop-blur">{notice}</div>
