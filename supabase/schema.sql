@@ -20,6 +20,7 @@ create table if not exists public.profiles (
 );
 
 alter table public.profiles add column if not exists username text;
+alter table public.profiles add column if not exists avatar_url text;
 alter table public.profiles add column if not exists account_status text not null default 'active';
 do $$ begin
   alter table public.profiles add constraint profiles_account_status_check check (account_status in ('active','suspended'));
@@ -110,6 +111,23 @@ end;
 $$;
 
 grant execute on function public.change_username(text) to authenticated;
+
+create or replace function public.change_avatar(new_avatar_url text)
+returns text
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  current_user_id uuid := auth.uid();
+begin
+  if current_user_id is null then raise exception 'AUTH_REQUIRED'; end if;
+  if new_avatar_url is null or char_length(new_avatar_url) > 2000 then raise exception 'INVALID_AVATAR_URL'; end if;
+  update public.profiles set avatar_url = new_avatar_url, updated_at = now() where id = current_user_id;
+  return new_avatar_url;
+end;
+$$;
+
+grant execute on function public.change_avatar(text) to authenticated;
 
 create or replace function public.admin_update_user(target_user_id uuid, new_role public.user_role, new_status text)
 returns boolean
@@ -311,6 +329,19 @@ drop policy if exists "users update own likes" on public.community_likes;
 create policy "users update own likes" on public.community_likes for update to authenticated using (user_id = (select auth.uid())::text) with check (user_id = (select auth.uid())::text);
 drop policy if exists "users delete own likes" on public.community_likes;
 create policy "users delete own likes" on public.community_likes for delete to authenticated using (user_id = (select auth.uid())::text or (select public.is_admin()));
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('avatars', 'avatars', true, 5242880, array['image/jpeg','image/png','image/webp'])
+on conflict (id) do update set public = excluded.public, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "public view avatars" on storage.objects;
+create policy "public view avatars" on storage.objects for select using (bucket_id = 'avatars');
+drop policy if exists "users upload avatars" on storage.objects;
+create policy "users upload avatars" on storage.objects for insert to authenticated with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
+drop policy if exists "users update avatars" on storage.objects;
+create policy "users update avatars" on storage.objects for update to authenticated using (bucket_id = 'avatars' and owner_id = (select auth.uid())::text) with check (bucket_id = 'avatars');
+drop policy if exists "users delete avatars" on storage.objects;
+create policy "users delete avatars" on storage.objects for delete to authenticated using (bucket_id = 'avatars' and owner_id = (select auth.uid())::text);
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('works', 'works', true, 10485760, array['image/jpeg','image/png','image/webp'])

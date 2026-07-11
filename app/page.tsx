@@ -34,7 +34,7 @@ type CollectionStatus = "wishlist" | "planned" | "completed" | "abandoned";
 type CollectionItem = { pageId: number; status: CollectionStatus; targetPrice?: string; addedAt: string };
 type AdvancedFilters = { grade: string; scale: string; year: string; difficulty: string };
 type ReleaseItem = { id: number; name: string; grade: string; date: string; status: "情报流出" | "官方确认" | "封绘公开" | "发售中" | "再贩" };
-type User = { id: string; username: string; nickname: string; role: Role; score: number; status?: "active" | "suspended" };
+type User = { id: string; username: string; nickname: string; role: Role; score: number; status?: "active" | "suspended"; avatarUrl?: string };
 type ManagedUser = { id: string; email: string; username: string; display_name?: string; role: "user" | "admin"; account_status: "active" | "suspended"; contribution_score: number; created_at: string };
 type TargetType = "post" | "work" | "tool";
 type CommunityComment = { id: number; targetType: TargetType; targetId: number; author: string; userId: string; content: string; rating?: number; createdAt: string };
@@ -219,7 +219,7 @@ export default function Home() {
   async function applyAuthenticatedUser(authUser: { id: string; email?: string }) {
     const supabase = createSupabaseBrowserClient();
     const profileResult = await supabase?.from("profiles").select("*").eq("id", authUser.id).single();
-    const profile = profileResult?.data as { username?: string; display_name?: string; role?: "user" | "admin"; account_status?: "active" | "suspended"; contribution_score?: number } | null;
+    const profile = profileResult?.data as { username?: string; display_name?: string; role?: "user" | "admin"; account_status?: "active" | "suspended"; contribution_score?: number; avatar_url?: string } | null;
     const role: Role = profile?.role === "admin" ? "admin" : "user";
     const status = profile?.account_status ?? "active";
     const email = authUser.email ?? "user@example.com";
@@ -232,7 +232,7 @@ export default function Home() {
     }
     setSupabaseUser(email);
     const username = profile?.username || profile?.display_name || email.split("@")[0];
-    setUser({ id: authUser.id, username, nickname: username, role, score: profile?.contribution_score ?? 0, status });
+    setUser({ id: authUser.id, username, nickname: username, role, score: profile?.contribution_score ?? 0, status, avatarUrl: profile?.avatar_url });
     if (role === "admin") {
       const usersResult = await supabase?.from("profiles").select("*").order("created_at", { ascending: false });
       if (usersResult?.data) setManagedUsers(usersResult.data as ManagedUser[]);
@@ -542,6 +542,29 @@ export default function Home() {
     return true;
   }
 
+  async function changeAvatar(file: File) {
+    if (user.role === "guest") { setNotice("请先登录后再上传头像。"); return false; }
+    if (!file.type.match(/^image\/(jpeg|png|webp)$/)) { setNotice("头像仅支持 JPG、PNG 或 WebP 格式。"); return false; }
+    if (file.size > 5 * 1024 * 1024) { setNotice("头像图片不能超过 5MB。"); return false; }
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      const avatarUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
+      setUser((current) => ({ ...current, avatarUrl }));
+      setNotice("头像已保存在当前浏览器中。");
+      return true;
+    }
+    const extension = file.name.split(".").pop()?.toLowerCase() ?? "jpg";
+    const path = `${user.id}/avatar.${extension}`;
+    const upload = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
+    if (upload.error) { setNotice(upload.error.message); return false; }
+    const publicUrl = `${supabase.storage.from("avatars").getPublicUrl(path).data.publicUrl}?v=${Date.now()}`;
+    const profile = await supabase.rpc("change_avatar", { new_avatar_url: publicUrl });
+    if (profile.error) { setNotice(profile.error.message); return false; }
+    setUser((current) => ({ ...current, avatarUrl: publicUrl }));
+    setNotice("头像更新成功。");
+    return true;
+  }
+
   async function updateManagedUser(id: string, role: "user" | "admin", status: "active" | "suspended") {
     const result = await createSupabaseBrowserClient()?.rpc("admin_update_user", { target_user_id: id, new_role: role, new_status: status });
     if (result?.error) { setNotice(result.error.message); return; }
@@ -618,7 +641,7 @@ export default function Home() {
         {section === "collections" && <CollectionsSection collections={collections} wiki={wiki} openWiki={openWiki} onUpdate={updateCollection} />}
         {section === "calendar" && <ReleaseCalendarSection releases={seedReleases} />}
         {section === "admin" && <AdminSection user={user} wiki={wiki} setWiki={setWiki} revisions={revisions} setRevisions={setRevisions} works={works} posts={posts} tools={tools} comments={comments} managedUsers={managedUsers} pendingCount={pendingCount} setNotice={setNotice} onDeleteEntry={deleteEntry} onDeleteComment={deleteComment} onUpdateUser={updateManagedUser} onDeleteUser={deleteManagedUser} />}
-        {section === "profile" && <ProfileSection user={user} wiki={wiki} works={works} posts={posts} onChangeUsername={changeUsername} />}
+        {section === "profile" && <ProfileSection user={user} wiki={wiki} works={works} posts={posts} onChangeUsername={changeUsername} onChangeAvatar={changeAvatar} />}
       </div>
     </main>
   );
@@ -642,7 +665,7 @@ function Header({ section, setSection, user, login, pendingCount, supabaseEnable
       </div>
       <div className="col-start-2 row-start-1 flex shrink-0 items-center justify-end gap-0.5 sm:gap-1 lg:col-start-3">
         {supabaseEnabled ? (supabaseUser ? <button onClick={() => onAuth("signout")} className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 px-0 text-[10px] font-bold text-slate-500 sm:h-auto sm:w-auto sm:rounded-xl sm:px-2.5 sm:py-1.5 sm:text-xs">退<span className="hidden sm:inline">出</span></button> : <button onClick={() => setSection("login")} className="grid h-8 w-8 place-items-center rounded-lg bg-blue-600 px-0 text-[10px] font-bold text-white sm:h-auto sm:w-auto sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs">登<span className="hidden sm:inline">录</span></button>) : <button onClick={() => login("admin")} className="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 px-0 text-[10px] font-bold sm:h-auto sm:w-auto sm:rounded-xl sm:px-2.5 sm:py-1.5 sm:text-xs">演<span className="hidden sm:inline">示</span></button>}
-        <button onClick={() => setSection("profile")} className="grid h-8 w-8 place-items-center rounded-lg bg-slate-900 px-0 text-[10px] font-bold text-white sm:h-auto sm:w-auto sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs"><span className="sm:hidden">{user.username.slice(0, 1).toUpperCase()}</span><span className="hidden sm:inline">@{user.username}</span></button>
+        <button onClick={() => setSection("profile")} className="grid h-8 w-8 place-items-center rounded-lg bg-slate-900 px-0 text-[10px] font-bold text-white sm:h-auto sm:w-auto sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs">{user.avatarUrl ? <img src={user.avatarUrl} alt="用户头像" className="h-7 w-7 rounded-md object-cover sm:h-6 sm:w-6" /> : <span className="sm:hidden">{user.username.slice(0, 1).toUpperCase()}</span>}<span className="hidden sm:inline">@{user.username}</span></button>
       </div>
     </div>
   </header>;
@@ -952,12 +975,16 @@ function ReleaseCalendarSection({ releases }: { releases: ReleaseItem[] }) {
   return <section className="space-y-6"><div className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-blue-950 to-blue-700 p-8 text-white shadow-xl"><div className="text-xs font-bold tracking-[.25em] text-blue-100">RELEASE TRACKER / 2026</div><h1 className="mt-3 text-4xl font-black text-white">新套件发售日历</h1><p className="mt-3 max-w-2xl text-blue-100">追踪情报流出、官方确认、封绘公开、发售与再贩状态，关注系列后可快速查看相关更新。</p><div className="mt-5 flex flex-wrap gap-2">{["HG","RG","MG","MGEX","PG"].map((grade) => <button key={grade} onClick={() => setFollowed((list) => list.includes(grade) ? list.filter((item) => item !== grade) : [...list, grade])} className={`rounded-full px-4 py-2 text-sm font-bold ${followed.includes(grade) ? "bg-white text-slate-900" : "bg-white/10 text-white"}`}>{followed.includes(grade) ? "✓ " : "+ "}关注 {grade}</button>)}</div></div>{months.map((month) => <div key={month} className="rounded-[1.75rem] bg-white p-6 shadow-xl"><h2 className="text-2xl font-black">{month.replace("-", " 年 ")} 月</h2><div className="mt-5 grid gap-3">{releases.filter((item) => item.date.startsWith(month) && (!followed.length || followed.includes(item.grade))).map((item) => <div key={item.id} className="grid items-center gap-4 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[80px_1fr_auto]"><div className="text-center"><div className="text-2xl font-black text-blue-600">{item.date.slice(8)}</div><div className="text-xs text-slate-400">JUL</div></div><div><div className="text-xs font-bold text-blue-600">{item.grade}</div><h3 className="text-lg font-black">{item.name}</h3></div><span className={`rounded-full px-3 py-1 text-xs font-bold ${item.status === "发售中" ? "bg-green-50 text-green-700" : item.status === "再贩" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>{item.status}</span></div>)}</div></div>)}</section>;
 }
 
-function ProfileSection({ user, wiki, works, posts, onChangeUsername }: { user: User; wiki: WikiPage[]; works: Work[]; posts: Post[]; onChangeUsername: (username: string) => Promise<boolean> }) {
+function ProfileSection({ user, wiki, works, posts, onChangeUsername, onChangeAvatar }: { user: User; wiki: WikiPage[]; works: Work[]; posts: Post[]; onChangeUsername: (username: string) => Promise<boolean>; onChangeAvatar: (file: File) => Promise<boolean> }) {
   const [username, setUsername] = useState(user.username);
   const [saving, setSaving] = useState(false);
-  useEffect(() => { setUsername(user.username); }, [user.username]);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [preview, setPreview] = useState(user.avatarUrl ?? "");
+  useEffect(() => { setUsername(user.username); setPreview(user.avatarUrl ?? ""); }, [user.username, user.avatarUrl]);
   async function save() { setSaving(true); await onChangeUsername(username); setSaving(false); }
-  return <section className="space-y-6"><div className="rounded-[2rem] bg-white p-8 shadow-xl"><div className="flex flex-col gap-5 md:flex-row md:items-center"><div className="grid h-24 w-24 place-items-center rounded-3xl bg-blue-600 text-4xl font-black text-white">{user.nickname[0]}</div><div><h1 className="text-3xl font-black">@{user.username}</h1><p className="mt-2 text-slate-500">{roleText[user.role]} · 贡献积分 {user.score}</p><div className="mt-3 flex flex-wrap gap-2">{["初入模界", "创始贡献者", "社交新星"].map((badge) => <span key={badge} className="rounded-full bg-amber-50 px-3 py-1 text-sm font-bold text-amber-700">{badge}</span>)}</div></div></div><div className="mt-8 grid gap-4 md:grid-cols-3">{[["参与条目", wiki.length], ["发布作品", works.filter((work) => work.author === user.username).length], ["发起讨论", posts.filter((post) => post.author === user.username).length]].map(([key, value]) => <div key={key} className="rounded-3xl bg-slate-50 p-5"><div className="text-sm font-bold text-slate-400">{key}</div><div className="mt-2 text-3xl font-black text-blue-600">{value}</div></div>)}</div></div>{user.role !== "guest" && <div className="rounded-[2rem] bg-white p-7 shadow-xl"><div className="text-xs font-bold tracking-[.25em] text-blue-600">ACCOUNT IDENTITY</div><h2 className="mt-2 text-2xl font-black">修改用户名</h2><p className="mt-2 text-sm text-slate-500">用户名全站唯一，支持 2–24 位文字、数字和下划线。</p><div className="mt-5 flex flex-col gap-3 sm:flex-row"><input value={username} onChange={(event) => setUsername(event.target.value)} className="flex-1 rounded-2xl border px-4 py-3" /><button disabled={saving || username.trim() === user.username} onClick={save} className="rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white disabled:bg-slate-300">{saving ? "检查并保存…" : "保存新用户名"}</button></div></div>}</section>;
+  async function uploadAvatar(file?: File) { if (!file) return; const localPreview = URL.createObjectURL(file); setPreview(localPreview); setUploadingAvatar(true); const success = await onChangeAvatar(file); setUploadingAvatar(false); URL.revokeObjectURL(localPreview); if (!success) setPreview(user.avatarUrl ?? ""); }
+  const avatar = preview || user.avatarUrl;
+  return <section className="space-y-6"><div className="rounded-[2rem] bg-white p-8 shadow-xl"><div className="flex flex-col gap-5 md:flex-row md:items-center"><div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-3xl bg-blue-600">{avatar ? <img src={avatar} alt={`${user.username}的头像`} className="h-full w-full object-cover" /> : <div className="grid h-full w-full place-items-center text-4xl font-black text-white">{user.nickname[0]}</div>}</div><div className="flex-1"><h1 className="text-3xl font-black">@{user.username}</h1><p className="mt-2 text-slate-500">{roleText[user.role]} · 贡献积分 {user.score}</p><div className="mt-3 flex flex-wrap gap-2">{["初入模界", "创始贡献者", "社交新星"].map((badge) => <span key={badge} className="rounded-full bg-amber-50 px-3 py-1 text-sm font-bold text-amber-700">{badge}</span>)}</div></div>{user.role !== "guest" && <label className="cursor-pointer rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm font-bold"><input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingAvatar} onChange={(event) => void uploadAvatar(event.target.files?.[0])} className="hidden" />{uploadingAvatar ? "头像上传中…" : "上传自定义头像"}<span className="mt-1 block text-xs font-normal text-slate-400">JPG、PNG、WebP，最大 5MB</span></label>}</div><div className="mt-8 grid gap-4 md:grid-cols-3">{[["参与条目", wiki.length], ["发布作品", works.filter((work) => work.author === user.username).length], ["发起讨论", posts.filter((post) => post.author === user.username).length]].map(([key, value]) => <div key={key} className="rounded-3xl bg-slate-50 p-5"><div className="text-sm font-bold text-slate-400">{key}</div><div className="mt-2 text-3xl font-black text-blue-600">{value}</div></div>)}</div></div>{user.role !== "guest" && <div className="rounded-[2rem] bg-white p-7 shadow-xl"><div className="text-xs font-bold tracking-[.25em] text-blue-600">ACCOUNT IDENTITY</div><h2 className="mt-2 text-2xl font-black">修改用户名</h2><p className="mt-2 text-sm text-slate-500">用户名全站唯一，支持 2–24 位文字、数字和下划线。</p><div className="mt-5 flex flex-col gap-3 sm:flex-row"><input value={username} onChange={(event) => setUsername(event.target.value)} className="flex-1 rounded-2xl border px-4 py-3" /><button disabled={saving || username.trim() === user.username} onClick={save} className="rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white disabled:bg-slate-300">{saving ? "检查并保存…" : "保存新用户名"}</button></div></div>}</section>;
 }
 
 function CloudGallerySection({ works, setSection, openWork, onTagSearch }: { works: Work[]; setSection: (section: Section) => void; openWork: (id: number) => void; onTagSearch: (tag: string) => void }) {
