@@ -606,12 +606,12 @@ function Header({ section, setSection, user, login, pendingCount, supabaseEnable
     ...(user.role === "admin" ? [{ key: "admin" as Section, label: "管理" }] : []),
   ];
   return <header className="sticky top-3 z-20 mb-4 px-3 py-2 backdrop-blur-xl">
-    <div className="grid items-center gap-3 xl:grid-cols-[1fr_minmax(320px,520px)_1fr]">
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      <div className="flex shrink-0 flex-nowrap items-center gap-1.5">
         <button onClick={() => setSection("home")} className="mr-1 flex items-center gap-2 rounded-xl px-1.5 py-1 text-left"><span className="grid h-8 w-8 place-items-center rounded-full bg-blue-600 text-sm font-black text-white">G</span><span className="hidden text-sm font-black sm:block">GUNPLA WIKI</span></button>
-        <nav className="flex flex-wrap gap-1">{nav.map((item) => <button key={item.key} onClick={() => setSection(item.key)} className={`rounded-xl px-2.5 py-1.5 text-xs font-bold transition ${section === item.key ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700"}`}>{item.label}{item.key === "admin" && pendingCount > 0 ? ` ${pendingCount}` : ""}</button>)}</nav>
+        <nav className="flex flex-nowrap gap-1">{nav.map((item) => <button key={item.key} onClick={() => setSection(item.key)} className={`rounded-xl px-2.5 py-1.5 text-xs font-bold transition ${section === item.key ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700"}`}>{item.label}{item.key === "admin" && pendingCount > 0 ? ` ${pendingCount}` : ""}</button>)}</nav>
       </div>
-      <div className="order-3 flex min-w-0 items-center gap-1.5 rounded-xl border border-white/20 bg-white p-1.5 shadow-lg xl:order-none">
+      <div className="mx-auto flex min-w-[300px] max-w-[520px] flex-1 items-center gap-1.5 rounded-xl border border-white/20 bg-white p-1.5 shadow-lg">
         <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submitSearch()} placeholder="搜索套件、作品、帖子或工具" className="min-w-0 flex-1 rounded-lg border-0 px-3 py-2 text-sm outline-none" />
         <button onClick={onOpenFilters} className="shrink-0 rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">筛选</button>
         <button onClick={() => submitSearch()} className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white">搜索</button>
