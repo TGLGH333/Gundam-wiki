@@ -606,18 +606,17 @@ function Header({ section, setSection, user, login, pendingCount, supabaseEnable
     ...(user.role === "admin" ? [{ key: "admin" as Section, label: "管理" }] : []),
   ];
   return <header className="sticky top-3 z-20 mb-4 px-3 py-2 backdrop-blur-xl">
-    <div className="flex items-center justify-between gap-1 pb-1">
-      <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-0.5 sm:gap-1.5">
-        <button onClick={() => setSection("home")} className="mr-0.5 flex shrink-0 items-center gap-2 rounded-xl px-0.5 py-1 text-left sm:mr-1 sm:px-1.5"><span className="grid h-8 w-8 place-items-center rounded-full bg-blue-600 text-sm font-black text-white">G</span><span className="hidden text-sm font-black sm:block">GUNPLA WIKI</span></button>
-        <nav className="flex min-w-0 flex-1 flex-nowrap justify-between gap-0.5 sm:flex-none sm:justify-start sm:gap-1">{nav.map((item) => <button key={item.key} onClick={() => setSection(item.key)} className={`whitespace-nowrap rounded-lg px-1 py-1.5 text-[9px] font-bold transition sm:rounded-xl sm:px-2.5 sm:text-xs ${section === item.key ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700"}`}>{item.label}{item.key === "admin" && pendingCount > 0 ? ` ${pendingCount}` : ""}</button>)}</nav>
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(240px,360px)_auto]">
+      <div className="flex min-w-0 items-center gap-0.5 sm:gap-1 lg:overflow-hidden">
+        <button onClick={() => setSection("home")} className="mr-0.5 flex shrink-0 items-center gap-2 rounded-xl px-0.5 py-1 text-left sm:mr-1 sm:px-1.5"><span className="grid h-8 w-8 place-items-center rounded-full bg-blue-600 text-sm font-black text-white">G</span><span className="hidden text-sm font-black xl:block">GUNPLA WIKI</span></button>
+        <nav className="flex min-w-0 flex-1 flex-nowrap justify-between gap-0.5 lg:justify-start lg:gap-1">{nav.map((item) => <button key={item.key} onClick={() => setSection(item.key)} className={`whitespace-nowrap rounded-lg px-1 py-1.5 text-[9px] font-bold transition sm:rounded-xl sm:px-2.5 sm:text-xs ${section === item.key ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700"}`}>{item.label}{item.key === "admin" && pendingCount > 0 ? ` ${pendingCount}` : ""}</button>)}</nav>
       </div>
-      <button onClick={onOpenFilters} aria-label="打开搜索" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-600 text-sm font-black text-white sm:hidden">⌕</button>
-      <div className="mx-auto hidden min-w-[300px] max-w-[520px] flex-1 items-center gap-1.5 rounded-xl border border-white/20 bg-white p-1.5 shadow-lg sm:flex">
+      <div className="col-span-2 row-start-2 flex w-full min-w-0 items-center gap-1.5 rounded-xl border border-white/20 bg-white p-1.5 shadow-lg lg:col-span-1 lg:col-start-2 lg:row-start-1 lg:mx-auto lg:max-w-[360px]">
         <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submitSearch()} placeholder="搜索套件、作品、帖子或工具" className="min-w-0 flex-1 rounded-lg border-0 px-3 py-2 text-sm outline-none" />
         <button onClick={onOpenFilters} className="shrink-0 rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">筛选</button>
         <button onClick={() => submitSearch()} className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white">搜索</button>
       </div>
-      <div className="flex shrink-0 items-center justify-end gap-0.5 sm:gap-1.5">
+      <div className="col-start-2 row-start-1 flex shrink-0 items-center justify-end gap-0.5 sm:gap-1 lg:col-start-3">
         {supabaseEnabled ? (supabaseUser ? <button onClick={() => onAuth("signout")} className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 px-0 text-[10px] font-bold text-slate-500 sm:h-auto sm:w-auto sm:rounded-xl sm:px-2.5 sm:py-1.5 sm:text-xs">退<span className="hidden sm:inline">出</span></button> : <button onClick={() => setSection("login")} className="grid h-8 w-8 place-items-center rounded-lg bg-blue-600 px-0 text-[10px] font-bold text-white sm:h-auto sm:w-auto sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs">登<span className="hidden sm:inline">录</span></button>) : <button onClick={() => login("admin")} className="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 px-0 text-[10px] font-bold sm:h-auto sm:w-auto sm:rounded-xl sm:px-2.5 sm:py-1.5 sm:text-xs">演<span className="hidden sm:inline">示</span></button>}
         <button onClick={() => setSection("profile")} className="grid h-8 w-8 place-items-center rounded-lg bg-slate-900 px-0 text-[10px] font-bold text-white sm:h-auto sm:w-auto sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs"><span className="sm:hidden">{user.username.slice(0, 1).toUpperCase()}</span><span className="hidden sm:inline">@{user.username}</span></button>
       </div>
