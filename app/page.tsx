@@ -951,7 +951,7 @@ function ForumSection({ posts, user, openPost, setSection, onTagSearch, onOpenMe
 function ForumPublishSection({ posts, setPosts, user, setNotice, setSection, supabaseEnabled }: { posts: Post[]; setPosts: (posts: Post[]) => void; user: User; setNotice: (notice: string) => void; setSection: (section: Section) => void; supabaseEnabled: boolean }) {
   const [title, setTitle] = useState(""); const [topic, setTopic] = useState(""); const [content, setContent] = useState(""); const [board, setBoard] = useState(boards[1]); const [tagText, setTagText] = useState(""); const [file, setFile] = useState<File | null>(null); const [uploading, setUploading] = useState(false);
   const tags = Array.from(new Set(tagText.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean))).slice(0, 8);
-  const canPublish = user.role !== "guest" && title.trim().length >= 5 && topic.trim().length >= 2 && content.trim().length >= 10;
+  const canPublish = user.role !== "guest" && title.trim().length >= 1 && content.trim().length >= 1;
   async function publish() {
     if (!canPublish) return; if (file && !file.type.match(/^image\/(jpeg|png|webp)$/)) return setNotice("帖子图片仅支持 JPG、PNG 或 WebP。"); if (file && file.size > 10 * 1024 * 1024) return setNotice("帖子图片不能超过 10MB。");
     setUploading(true); let imageUrl: string | undefined;
