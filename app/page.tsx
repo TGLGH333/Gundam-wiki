@@ -330,8 +330,37 @@ export default function Home() {
       const revisionRows = revisions.map((item) => ({ id: item.id, page_id: item.pageId, revision: item.revision, content: item.content, summary: item.summary, editor: item.editor, status: item.status, image_url: item.imageUrl ?? null, created_at: item.createdAt }));
       const workRows = works.map((item) => ({ id: item.id, title: item.title, kit: item.kit, description: item.desc, tags: item.tags, author: item.author, likes: item.likes, comments: item.comments, color: item.color, image_url: (item as Work & { imageUrl?: string }).imageUrl ?? null, created_at: item.createdAt }));
       const postRows = posts.map((item) => ({ id: item.id, board: item.board, title: item.title, content: item.content, author: item.author, tags: item.tags ?? [], replies: item.replies, likes: item.likes, pinned: Boolean(item.pinned), featured: Boolean(item.featured), created_at: item.createdAt }));
-      const results = await Promise.all([...(user.role === "admin" ? [supabase.from("wiki_pages").upsert(wikiRows)] : []), supabase.from("wiki_revisions").upsert(revisionRows), supabase.from("works").upsert(workRows), supabase.from("forum_posts").upsert(postRows), supabase.from("tools").upsert(tools)]);
-      if (results.some((result) => result.error)) setNotice("部分云端内容同步失败，本地副本仍然安全保存。");
+      const tasks: { name: string; run: () => Promise<{ data: unknown; error: { message: string } | null }> }[] = [
+        ...(user.role === "admin" ? [{ name: "知识库", run: async () => {
+          const result = await supabase.from("wiki_pages").upsert(wikiRows);
+          if (result.error && /image_url|schema cache|column/i.test(result.error.message)) return supabase.from("wiki_pages").upsert(wikiRows.map(({ image_url: _imageUrl, ...row }) => row));
+          return result;
+        } }] : []),
+        { name: "编辑记录", run: async () => {
+          const result = await supabase.from("wiki_revisions").upsert(revisionRows);
+          if (result.error && /image_url|schema cache|column/i.test(result.error.message)) return supabase.from("wiki_revisions").upsert(revisionRows.map(({ image_url: _imageUrl, ...row }) => row));
+          return result;
+        } },
+        { name: "作品", run: () => supabase.from("works").upsert(workRows) },
+        { name: "讨论", run: async () => {
+          const result = await supabase.from("forum_posts").upsert(postRows);
+          if (result.error && /tags|schema cache|column/i.test(result.error.message)) {
+            return supabase.from("forum_posts").upsert(postRows.map(({ tags: _tags, ...row }) => row));
+          }
+          return result;
+        } },
+        ...(user.role === "admin" ? [{ name: "工具", run: async () => {
+          const result = await supabase.from("tools").upsert(tools);
+          if (result.error && /tags|schema cache|column/i.test(result.error.message)) {
+            return supabase.from("tools").upsert(tools.map(({ tags: _tags, ...tool }) => tool));
+          }
+          return result;
+        } }] : []),
+      ];
+      const results = await Promise.all(tasks.map(async (task) => ({ name: task.name, result: await task.run() })));
+      const failed = results.filter(({ result }) => result.error).map(({ name }) => name);
+      if (failed.length) setNotice(`${failed.join("、")}云端同步失败，本地副本仍然安全保存。`);
+      else setNotice("云端内容已同步。");
     }, 800);
     return () => window.clearTimeout(timer);
   }, [wiki, revisions, works, posts, tools, remoteLoaded, supabaseUser, user.role]);
