@@ -568,7 +568,7 @@ export default function Home() {
       </div>
 
       <div className="relative mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
-        <Header section={section} setSection={setSection} user={user} login={login} pendingCount={pendingCount} supabaseEnabled={supabaseEnabled} supabaseUser={supabaseUser} onAuth={handleSupabaseAuth} />
+        <Header section={section} setSection={setSection} user={user} login={login} pendingCount={pendingCount} supabaseEnabled={supabaseEnabled} supabaseUser={supabaseUser} onAuth={handleSupabaseAuth} query={query} setQuery={setQuery} submitSearch={submitSearch} onOpenFilters={() => { setFiltersOpen(true); setSection("search"); }} />
         <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-blue-100 bg-white/90 px-3 py-2 text-xs text-slate-600 shadow-lg backdrop-blur">{notice}</div>
 
         {section === "login" && <LoginSection supabaseEnabled={supabaseEnabled} onAuth={handleSupabaseAuth} />}
@@ -600,23 +600,23 @@ export default function Home() {
   );
 }
 
-function Header({ section, setSection, user, login, pendingCount, supabaseEnabled, supabaseUser, onAuth }: { section: Section; setSection: (s: Section) => void; user: User; login: (r: Role) => void; pendingCount: number; supabaseEnabled: boolean; supabaseUser: string | null; onAuth: (action: "signin" | "signup" | "signout", email?: string, password?: string, portal?: "user" | "admin", username?: string) => Promise<void> }) {
+function Header({ section, setSection, user, login, pendingCount, supabaseEnabled, supabaseUser, onAuth, query, setQuery, submitSearch, onOpenFilters }: { section: Section; setSection: (s: Section) => void; user: User; login: (r: Role) => void; pendingCount: number; supabaseEnabled: boolean; supabaseUser: string | null; onAuth: (action: "signin" | "signup" | "signout", email?: string, password?: string, portal?: "user" | "admin", username?: string) => Promise<void>; query: string; setQuery: (query: string) => void; submitSearch: (value?: string) => void; onOpenFilters: () => void }) {
   const nav: { key: Section; label: string }[] = [
     { key: "home", label: "首页" }, { key: "wiki", label: "知识库" }, { key: "gallery", label: "作品" }, { key: "forum", label: "讨论" }, { key: "tools", label: "工具" }, { key: "collections", label: "清单" }, { key: "calendar", label: "发售" },
     ...(user.role === "admin" ? [{ key: "admin" as Section, label: "管理" }] : []),
   ];
   return <header className="sticky top-3 z-20 mb-4 px-3 py-2 backdrop-blur-xl">
-    <div className="flex items-start justify-between gap-3">
+    <div className="grid items-center gap-3 xl:grid-cols-[1fr_minmax(320px,520px)_1fr]">
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-        <button onClick={() => setSection("home")} className="mr-1 flex items-center gap-2 rounded-xl px-1.5 py-1 text-left">
-          <span className="grid h-8 w-8 place-items-center rounded-full bg-blue-600 text-sm font-black text-white">G</span>
-          <span className="hidden text-sm font-black sm:block">GUNPLA WIKI</span>
-        </button>
-        <nav className="flex flex-wrap gap-1">
-          {nav.map((item) => <button key={item.key} onClick={() => setSection(item.key)} className={`rounded-xl px-2.5 py-1.5 text-xs font-bold transition ${section === item.key ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700"}`}>{item.label}{item.key === "admin" && pendingCount > 0 ? ` ${pendingCount}` : ""}</button>)}
-        </nav>
+        <button onClick={() => setSection("home")} className="mr-1 flex items-center gap-2 rounded-xl px-1.5 py-1 text-left"><span className="grid h-8 w-8 place-items-center rounded-full bg-blue-600 text-sm font-black text-white">G</span><span className="hidden text-sm font-black sm:block">GUNPLA WIKI</span></button>
+        <nav className="flex flex-wrap gap-1">{nav.map((item) => <button key={item.key} onClick={() => setSection(item.key)} className={`rounded-xl px-2.5 py-1.5 text-xs font-bold transition ${section === item.key ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700"}`}>{item.label}{item.key === "admin" && pendingCount > 0 ? ` ${pendingCount}` : ""}</button>)}</nav>
       </div>
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div className="order-3 flex min-w-0 items-center gap-1.5 rounded-xl border border-white/20 bg-white p-1.5 shadow-lg xl:order-none">
+        <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submitSearch()} placeholder="搜索套件、作品、帖子或工具" className="min-w-0 flex-1 rounded-lg border-0 px-3 py-2 text-sm outline-none" />
+        <button onClick={onOpenFilters} className="shrink-0 rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">筛选</button>
+        <button onClick={() => submitSearch()} className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white">搜索</button>
+      </div>
+      <div className="flex shrink-0 items-center justify-end gap-1.5">
         {supabaseEnabled ? (supabaseUser ? <button onClick={() => onAuth("signout")} className="hidden rounded-xl border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-500 sm:block">退出</button> : <button onClick={() => setSection("login")} className="rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-bold text-white">登录</button>) : <button onClick={() => login("admin")} className="rounded-xl bg-slate-100 px-2.5 py-1.5 text-xs font-bold">演示</button>}
         <button onClick={() => setSection("profile")} className="rounded-xl bg-slate-900 px-3 py-1.5 text-xs font-bold text-white">@{user.username}</button>
       </div>
@@ -711,14 +711,6 @@ function SearchFilters({ open, selectedTag, setSelectedTag, searchScope, setSear
 
 function HomeSection({ wiki, works, posts, hotTerms, query, setQuery, submitSearch, openWiki, setSection, filtersOpen, setFiltersOpen, selectedTag, setSelectedTag, searchScope, setSearchScope, allTags, advancedFilters, setAdvancedFilters }: { wiki: WikiPage[]; works: Work[]; posts: Post[]; hotTerms: string[]; query: string; setQuery: (q: string) => void; submitSearch: (value?: string) => void; openWiki: (id: number) => void; setSection: (s: Section) => void; filtersOpen: boolean; setFiltersOpen: (open: boolean) => void; selectedTag: string; setSelectedTag: (tag: string) => void; searchScope: SearchScope; setSearchScope: (scope: SearchScope) => void; allTags: string[]; advancedFilters: AdvancedFilters; setAdvancedFilters: (filters: AdvancedFilters) => void }) {
   return <section className="space-y-6">
-    <div>
-      <div className="rounded-[1.5rem] border border-white/20 bg-white p-2 shadow-xl sm:flex">
-        <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submitSearch()} placeholder="搜索模型、技法、作品、帖子或工具" className="min-h-12 flex-1 rounded-xl px-4 outline-none" />
-        <button onClick={() => setFiltersOpen(!filtersOpen)} className={`w-full rounded-xl px-5 py-3 text-sm font-bold sm:w-auto ${filtersOpen || selectedTag || searchScope !== "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}>筛选{selectedTag || searchScope !== "all" ? " · 已启用" : ""}</button>
-        <button onClick={() => submitSearch()} className="w-full rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white sm:w-auto">搜索</button>
-      </div>
-      <SearchFilters open={filtersOpen} selectedTag={selectedTag} setSelectedTag={setSelectedTag} searchScope={searchScope} setSearchScope={setSearchScope} allTags={allTags} advancedFilters={advancedFilters} setAdvancedFilters={setAdvancedFilters} />
-    </div>
     <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-slate-500"><span>热门搜索</span>{hotTerms.map((term) => <button key={term} onClick={() => { setQuery(term); submitSearch(term); }} className="rounded-full border border-white/20 bg-white px-3 py-1.5 font-bold text-slate-600">{term}</button>)}</div>
     <div className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-blue-950 to-blue-700 p-8 text-white shadow-2xl sm:p-12">
       <div className="mb-8 flex flex-wrap gap-2">{categories.slice(0, 4).map((item) => <span key={item} className="rounded-full bg-white/10 px-3 py-1.5 text-xs backdrop-blur">{item}</span>)}</div>
