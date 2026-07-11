@@ -22,7 +22,7 @@
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; background: var(--page); }
 body { margin: 0; min-height: 100vh; color: var(--ink); font-family: var(--font-geist-sans), Arial, sans-serif; background: var(--page); }
-main { position: relative; isolation: isolate; overflow: hidden; color: var(--ink); background-image: linear-gradient(rgba(0,0,0,.14) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,.14) 1px, transparent 1px), linear-gradient(rgba(0,0,0,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,.035) 1px, transparent 1px) !important; background-color: var(--page) !important; background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px; background-position: -1px -1px; }
+main { position: relative; isolation: isolate; overflow: hidden; color: var(--ink); background: linear-gradient(rgba(17,17,17,.025) 1px, transparent 1px), linear-gradient(90deg, rgba(17,17,17,.025) 1px, transparent 1px), var(--page) !important; background-size: 40px 40px; }
 main::before { content: ""; position: fixed; z-index: -1; inset: 0; pointer-events: none; background: radial-gradient(circle at 80% 5%, rgba(0,0,0,.045), transparent 24rem), radial-gradient(circle at 5% 75%, rgba(0,0,0,.025), transparent 20rem); }
 main::after { content: "GUNPLA WIKI / MODEL ARCHIVE / 01—144"; position: fixed; z-index: -1; right: -3rem; top: 46%; transform: rotate(90deg); color: rgba(17,17,17,.16); font: 700 9px/1 var(--font-geist-mono), monospace; letter-spacing: .3em; pointer-events: none; }
 
