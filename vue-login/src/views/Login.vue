@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { supabaseAuth, SUPABASE_URL, PUBLISHABLE_KEY, MAIN_APP_URL } from '../supabase'
+import { supabaseAuth, SUPABASE_URL, PUBLISHABLE_KEY } from '../supabase'
 
 const route = useRoute()
 const router = useRouter()
@@ -115,31 +115,12 @@ async function submit() {
         }
         notice.value = portal.value === 'admin' ? '管理员登录成功，正在跳转…' : '登录成功，正在跳转…'
         noticeType.value = 'success'
-        // 跨域（5173 -> 3000）localStorage 不共享，需通过 query 参数把 token 传递给主应用
-        const accessToken = localStorage.getItem('gundam_supabase_token')
-        const refreshToken = localStorage.getItem('gundam_supabase_refresh_token')
         setTimeout(() => {
-          // 跳转回主应用（Next.js）。redirect 通常是相对路径（如 /#/），需拼接主应用 origin
+          // 同源（通过 Next.js rewrites 代理），localStorage 共享，直接跳转相对路径即可
           const target = redirect.value && redirect.value !== '/' && redirect.value !== '/login'
             ? redirect.value
             : '/'
-          // 如果是完整 URL（http 开头）直接使用，否则拼接到主应用 origin
-          const baseUrl = /^https?:\/\//.test(target) ? target : `${MAIN_APP_URL}${target.startsWith('/') ? '' : '/'}${target}`
-          // 附加 token 参数，主应用读取后会清除 URL
-          const tokenParams = new URLSearchParams()
-          if (accessToken) tokenParams.set('auth_token', accessToken)
-          if (refreshToken) tokenParams.set('refresh_token', refreshToken)
-          const separator = baseUrl.includes('?') ? '&' : '?'
-          const hashIndex = baseUrl.indexOf('#')
-          if (hashIndex >= 0) {
-            // 把 token 插到 hash 之前，避免破坏 hash 路由
-            const beforeHash = baseUrl.slice(0, hashIndex)
-            const hashPart = baseUrl.slice(hashIndex)
-            const finalUrl = `${beforeHash}${separator}${tokenParams.toString()}${hashPart}`
-            window.location.href = finalUrl
-          } else {
-            window.location.href = `${baseUrl}${separator}${tokenParams.toString()}`
-          }
+          window.location.href = target
         }, 600)
       }
     }

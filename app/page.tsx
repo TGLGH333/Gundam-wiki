@@ -288,21 +288,6 @@ export default function Home() {
   }
 
   useEffect(() => {
-    // 接收来自 Vue 登录页跨域传递的 token（5173 -> 3000 localStorage 不共享）
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      const authToken = params.get("auth_token");
-      const refreshToken = params.get("refresh_token");
-      if (authToken) {
-        localStorage.setItem("gundam_supabase_token", authToken);
-        if (refreshToken) localStorage.setItem("gundam_supabase_refresh_token", refreshToken);
-        // 清除 URL 中的 token，避免泄露到历史记录
-        const url = new URL(window.location.href);
-        url.searchParams.delete("auth_token");
-        url.searchParams.delete("refresh_token");
-        window.history.replaceState({}, "", url.toString());
-      }
-    }
     const storedWiki = readListStore("gundam_wiki_pages", seedWiki);
     setWiki([...storedWiki, ...seedWiki.filter((seed) => !storedWiki.some((item) => item.id === seed.id))]);
     setRevisions(readListStore("gundam_wiki_revisions", seedRevisions));

@@ -14,6 +14,13 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
+  async rewrites() {
+    return [
+      // 代理 /login 到 Vue 登录页（Vite 服务），同源访问，localStorage 共享
+      { source: "/login", destination: "http://localhost:5173/login/" },
+      { source: "/login/:path*", destination: "http://localhost:5173/login/:path*" },
+    ];
+  },
 };
 
 export default nextConfig;
