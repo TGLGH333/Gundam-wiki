@@ -1,5 +1,7 @@
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://vjpgugicrwwydvkifiam.supabase.co'
 const PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_Lwgm4DrMboFdAkLxd-vuNA_pIwmhLYA'
+// 主应用（Next.js）的访问地址，登录成功后跳转回主应用
+const MAIN_APP_URL = import.meta.env.VITE_MAIN_APP_URL || 'http://localhost:3000'
 
 const TOKEN_KEY = 'gundam_supabase_token'
 const REFRESH_TOKEN_KEY = 'gundam_supabase_refresh_token'
@@ -79,4 +81,4 @@ export const supabaseAuth = {
   },
 }
 
-export { SUPABASE_URL, PUBLISHABLE_KEY }
+export { SUPABASE_URL, PUBLISHABLE_KEY, MAIN_APP_URL }
