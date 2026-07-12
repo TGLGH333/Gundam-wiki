@@ -8,6 +8,8 @@ const nextConfig: NextConfig = {
       process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://vjpgugicrwwydvkifiam.supabase.co",
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_Lwgm4DrMboFdAkLxd-vuNA_pIwmhLYA",
+    NEXT_PUBLIC_LOGIN_URL:
+      process.env.NEXT_PUBLIC_LOGIN_URL ?? "/login",
   },
   images: {
     unoptimized: true,
